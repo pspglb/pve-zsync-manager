@@ -3,15 +3,15 @@
 import sys
 import argparse
 
-from pzm-status import read_from_json
-from pzm-restore import gather_restore_data, restore
-from pzm-sync import sync
-from pzm-sanitize import sanitize
-from pzm-locking import unlock
-import pzm-common
+from pzm_status import read_from_json
+from pzm_restore import gather_restore_data, restore
+from pzm_sync import sync
+from pzm_sanitize import sanitize
+from pzm_locking import unlock
+import pzm_common
 
 def main():
-    pzm-common.initialize()
+    pzm_common.initialize()
     # Command: sync  - Arguments
     syncArgsParser = argparse.ArgumentParser()
 
@@ -68,11 +68,11 @@ def main():
 
     if "sync" in sys.argv:
         args = syncArgsParser.parse_args()
-        pzm-common.debug = args.verbose
-        pzm-common.test = args.test
-        if pzm-common.debug:
+        pzm_common.debug = args.verbose
+        pzm_common.test = args.test
+        if pzm_common.debug:
             log ("Debug mode")
-        if pzm-common.test:
+        if pzm_common.test:
             log ("Test mode")
         try:
             log ("Sync started with: " + ' '.join(sys.argv[0:]))
@@ -89,11 +89,11 @@ def main():
 
     elif "restore" in sys.argv:
         args = restoreArgsParser.parse_args()
-        pzm-common.debug = args.verbose
-        pzm-common.test = args.test
-        if pzm-common.debug:
+        pzm_common.debug = args.verbose
+        pzm_common.test = args.test
+        if pzm_common.debug:
             print ("Debug mode")
-        if pzm-common.test:
+        if pzm_common.test:
             print ("Test mode")
         try:
             disk_groups = gather_restore_data(args)
@@ -110,11 +110,11 @@ def main():
 
     elif "sanitize" in sys.argv:
         args = sanitizeArgsParser.parse_args()
-        pzm-common.debug = args.verbose
-        pzm-common.test = args.test
-        if pzm-common.debug:
+        pzm_common.debug = args.verbose
+        pzm_common.test = args.test
+        if pzm_common.debug:
             print ("Debug mode")
-        if pzm-common.test:
+        if pzm_common.test:
             print ("Test mode")
         sanitize(args)
 

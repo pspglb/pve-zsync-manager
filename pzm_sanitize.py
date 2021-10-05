@@ -2,7 +2,7 @@ import time
 import datetime
 import os
 
-from pzm-common import execute_readonly_command, execute_command, log, log_debug
+from pzm_common import execute_readonly_command, execute_command, log, log_debug
 
 #get the lastest snapshot of dataset, or zvol
 def get_latest_snapshot(dataset_name, backupname):

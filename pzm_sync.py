@@ -5,16 +5,16 @@ import datetime
 import os
 from json.decoder import JSONDecodeError
 
-import pzm-common
-from pzm-common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
-from pzm-locking import lock, unlock
+import pzm_common
+from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
+from pzm_locking import lock, unlock
 
 
 #Removed CT/VM IDs which no longer exist from the status file.
 def cleanup_json(delete = ""):
-    if not os.path.exists(pzm-common.statusJsonFile):
-        os.mknod(pzm-common.statusJsonFile)
-    with open(pzm-common.statusJsonFile, "r") as jsonFile:
+    if not os.path.exists(pzm_common.statusJsonFile):
+        os.mknod(pzm_common.statusJsonFile)
+    with open(pzm_common.statusJsonFile, "r") as jsonFile:
         try:
             data = json.load(jsonFile)
         except JSONDecodeError:
@@ -38,7 +38,7 @@ def cleanup_json(delete = ""):
                      'status': data['status'],
                      'info': data['info']
                  }
-        with open(pzm-common.statusJsonFile, "w") as jsonFile:
+        with open(pzm_common.statusJsonFile, "w") as jsonFile:
             json.dump(newData, jsonFile)
 
 #Delete logfiles from errored syncs if they are older than 7 days.
@@ -59,9 +59,9 @@ def write_logfile(data, logfilename):
 
 #Write status to json status file
 def write_to_json(id, backupname, starttime, endtime, duration, size, status, info):
-    if not os.path.exists(pzm-common.statusJsonFile):
-        os.mknod(pzm-common.statusJsonFile)
-    with open(pzm-common.statusJsonFile, "r") as jsonFile:
+    if not os.path.exists(pzm_common.statusJsonFile):
+        os.mknod(pzm_common.statusJsonFile)
+    with open(pzm_common.statusJsonFile, "r") as jsonFile:
         try:
             data = json.load(jsonFile)
         except JSONDecodeError:
@@ -76,7 +76,7 @@ def write_to_json(id, backupname, starttime, endtime, duration, size, status, in
         'status': status,
         'info': info
     }
-    with open(pzm-common.statusJsonFile, "w") as jsonFile:
+    with open(pzm_common.statusJsonFile, "w") as jsonFile:
         json.dump(data, jsonFile)
 
 
@@ -113,7 +113,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
         if ':' in id:
             is_pull = True
         starttime = datetime.datetime.now()
-        if not pzm-common.test:
+        if not pzm_common.test:
             write_to_json(id, backupname, starttime.strftime(timeformat), "-", "-", "-", "syncing", "")
         command = ['pve-zsync', 'sync',
                       '--source', id,
@@ -162,7 +162,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
 
         if rc != 0:
             if "include no disk on zfs" in stderr:
-                if not pzm-common.test:
+                if not pzm_common.test:
                     cleanup_json(id)
                     continue #"include no disk on zfs" is not an error... just skip this vm/ct id and continue with the next. We don't need log data either
             log (stderr)
@@ -171,7 +171,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
             failedOnce = True
             response = response + "ID " + id + " - ERROR - Took " + str(duration) +"\n"
             write_logfile(stderr, str(pid) + '.err')
-            if not pzm-common.test:
+            if not pzm_common.test:
                 write_to_json(id, backupname, starttime.strftime(timeformat), endtime.strftime(timeformat), str(duration), "error", "-" ,"Errorlog at " + os.path.join(logpath,str(pid) + ".err"))
         else:
             log ("ID " + id + " done successfully with " + str (tries+1) + " attempts. Took " + str(duration))
@@ -179,7 +179,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
             additionalMessage = ""
             if tries > 0:
                 additionalMessage = "Needed " + str(tries) + " additional retries, check " + os.path.join(logpath) + "[" + logfilestrings + "]"
-            if not pzm-common.test:
+            if not pzm_common.test:
                 estimated_total_size_matches = re.findall(r"total estimated size is.*", stderr)
                 estimated_size = ""
                 if len(estimated_total_size_matches) > 0:
@@ -196,7 +196,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
     finaltime = datetime.datetime.now()
     finalduration = duration = finaltime - firststarttime
     if not is_pull:
-        if not pzm-common.test:
+        if not pzm_common.test:
             write_to_json("all", backupname, firststarttime.strftime(timeformat), finaltime.strftime(timeformat), str(finalduration), "-", "error" if failedOnce else "ok", "")
 
     response = response + "\n" + "Finished in " + str(finalduration)

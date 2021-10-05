@@ -1,7 +1,7 @@
 #!/usr/bin/env -S python3 -u
 
-import pzm-common
-from pzm-common import log, log_debug, execute_command, execute_readonly_command
+import pzm_common
+from pzm_common import log, log_debug, execute_command, execute_readonly_command
 import os
 import socket
 
@@ -156,7 +156,7 @@ def unlock_local():
 def lock(hostname):
     global locked
     presleep = random.uniform(0,60)
-    if not pzm-common.test:
+    if not pzm_common.test:
         log ("Waiting for " + str(presleep) + "s before starting...")
         time.sleep(presleep) #Random Delay to minimize possibility of simultanious locking...
     log ("Aquiring locks")

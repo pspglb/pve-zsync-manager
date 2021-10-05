@@ -4,9 +4,9 @@ import time
 import datetime
 import os
 
-import pzm-common
-from pzm-common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
-from pzm-locking import lock, unlock
+import pzm_common
+from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
+from pzm_locking import lock, unlock
 
 
 #Disc class for the restore function.
@@ -132,7 +132,7 @@ def gather_restore_data(args):
         zfs_disks.remove(x)
     zfs_disk_objects = []
 
-    if pzm-common.debug:
+    if pzm_common.debug:
         print ("Disks found after filter: " + str(zfs_disks))
 
     for zfs_disk in zfs_disks:

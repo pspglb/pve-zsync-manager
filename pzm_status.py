@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import pzm-common
+import pzm_common
 from prettytable import PrettyTable
 from json.decoder import JSONDecodeError
 
@@ -19,9 +19,9 @@ class bcolors:
 
 #Read status from json status file. Either in fancy, human friendly manner (plain=False), or for automated reports, in plain text
 def read_from_json(plain):
-    if not os.path.exists(pzm-common.statusJsonFile):
-        os.mknod(pzm-common.statusJsonFile)
-    with open(pzm-common.statusJsonFile, "r") as jsonFile:
+    if not os.path.exists(pzm_common.statusJsonFile):
+        os.mknod(pzm_common.statusJsonFile)
+    with open(pzm_common.statusJsonFile, "r") as jsonFile:
         try:
             readdata = json.load(jsonFile)
             readdataString = json.dumps(readdata, sort_keys=True)
