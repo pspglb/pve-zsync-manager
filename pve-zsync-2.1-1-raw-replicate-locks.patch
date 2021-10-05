@@ -1,0 +1,175 @@
+--- /usr/sbin/pve-zsync.orig	2021-05-04 14:36:47.000000000 +0200
++++ /usr/sbin/pve-zsync	2021-05-18 20:44:47.522825817 +0200
+@@ -251,6 +251,8 @@
+ 	dest_user => undef,
+ 	prepend_storage_id => undef,
+ 	properties => undef,
++	raw => undef,
++	replicate => undef,
+ 	dest_config_path => undef,
+     };
+ 
+@@ -268,6 +270,8 @@
+ 	'dest-user=s' => \$param->{dest_user},
+ 	'prepend-storage-id' => \$param->{prepend_storage_id},
+ 	'properties' => \$param->{properties},
++	'raw' => \$param->{raw},
++	'replicate' => \$param->{replicate},
+ 	'dest-config-path=s' => \$param->{dest_config_path},
+     );
+ 
+@@ -341,6 +345,8 @@
+     $job->{dest_user} = $param->{dest_user};
+     $job->{prepend_storage_id} = !!$param->{prepend_storage_id};
+     $job->{properties} = !!$param->{properties};
++    $job->{raw} = !!$param->{raw};
++    $job->{replicate} = !!$param->{replicate};
+     $job->{dest_config_path} = $param->{dest_config_path} if $param->{dest_config_path};
+ 
+     return $job;
+@@ -467,6 +473,8 @@
+     $text .= " --dest-user $job->{dest_user}";
+     $text .= " --prepend-storage-id" if $job->{prepend_storage_id};
+     $text .= " --properties" if $job->{properties};
++    $text .= " --raw" if $job->{raw};
++    $text .= " --replicate" if $job->{replicate};
+     $text .= " --dest-config-path $job->{dest_config_path}" if $job->{dest_config_path};
+     $text .= "\n";
+ 
+@@ -622,6 +630,47 @@
+     return 0;
+ }
+ 
++sub lock_vmid {
++    my ($target, $user) = @_;
++
++    my $cmd = [];
++    push @$cmd, 'ssh', "$user\@$target->{ip}", '--', if $target->{ip};
++
++    if ($target->{vm_type} eq 'qemu') {
++        push @$cmd, 'qm', 'set', $target->{vmid}, '--lock=backup';
++    } elsif ($target->{vm_type} eq 'lxc') {
++        push @$cmd, 'pct', 'set', $target->{vmid}, '--lock=backup';
++    } else {
++        die "VM Type unknown, or source-host not reachable\n";
++    }
++    local $@;
++    #do {
++        eval {
++	    my $res = run_cmd($cmd);
++        };
++    #sleep 5
++    #} while $@;
++}
++
++sub unlock_vmid {
++    my ($target, $user) = @_;
++
++    my $cmd = [];
++    push @$cmd, 'ssh', "$user\@$target->{ip}", '--', if $target->{ip};
++
++    if ($target->{vm_type} eq 'qemu') {
++        push @$cmd, 'qm', 'unlock', $target->{vmid};
++    } elsif ($target->{vm_type} eq 'lxc') {
++        push @$cmd, 'pct', 'unlock', $target->{vmid};
++    } else {
++        die "VM Type unknown, or source-host not reachable\n";
++    }
++    local $@;
++    eval {
++        my $res = run_cmd($cmd);
++    };
++}
++
+ sub sync {
+     my ($param) = @_;
+ 
+@@ -693,8 +742,9 @@
+ 	    if ($source->{vmid}) {
+ 		die "VM $source->{vmid} doesn't exist\n" if !$vm_type;
+ 		die "source-user has to be root for syncing VMs\n" if ($param->{source_user} ne "root");
++		lock_vmid($source, $param->{source_user});
+ 		my $disks = get_disks($source, $param->{source_user});
+-
++		
+ 		foreach my $disk (sort keys %{$disks}) {
+ 		    $source->{all} = $disks->{$disk}->{all};
+ 		    $source->{pool} = $disks->{$disk}->{pool};
+@@ -711,8 +761,11 @@
+ 		} else {
+ 		    send_config($source, $dest,'local', $param->{source_user}, $param->{dest_user}, $param->{dest_config_path});
+ 		}
++		unlock_vmid($source, $param->{source_user});
+ 	    } else {
++		lock_vmid($source, $param->{source_user});
+ 		&$sync_path($source, $dest, $job, $param, $date);
++		unlock_vmid($source, $param->{source_user});
+ 	    }
+ 	};
+ 	if (my $err = $@) {
+@@ -725,6 +778,7 @@
+ 		}
+ 	    });
+ 	    print "Job --source $param->{source} --name $param->{name} got an ERROR!!!\nERROR Message:\n";
++            unlock_vmid($source, $param->{source_user});
+ 	    die "$err\n";
+ 	}
+ 
+@@ -1014,11 +1068,17 @@
+ 
+     push @$cmd, 'ssh', '-o', 'BatchMode=yes', "$param->{source_user}\@$source->{ip}", '--' if $source->{ip};
+     push @$cmd, 'zfs', 'send';
++    push @$cmd, '-w', if $param->{raw};
++    push @$cmd, '-R', if $param->{replicate};
+     push @$cmd, '-p', if $param->{properties};
+     push @$cmd, '-v' if $param->{verbose};
+ 
+     if($dest->{last_snap} && snapshot_exist($source , $dest, $param->{method}, $param->{source_user})) {
+-	push @$cmd, '-i', "$source->{all}\@$dest->{last_snap}";
++        if($param->{replicate}) {
++                push @$cmd, '-I', "$source->{all}\@$dest->{last_snap}";
++        } else {
++                push @$cmd, '-i', "$source->{all}\@$dest->{last_snap}";
++        }
+     }
+     push @$cmd, '--', "$source->{all}\@$source->{new_snap}";
+ 
+@@ -1051,7 +1111,7 @@
+     my $dest_target_new ="$source->{vmid}.conf.$source->{vm_type}.$source->{new_snap}";
+ 
+     my $config_dir = $dest_config_path // $CONFIG_PATH;
+-    $config_dir .= "/$dest->{last_part}" if $dest->{last_part};
++    #$config_dir .= "/$dest->{last_part}" if $dest->{last_part};
+ 
+     $dest_target_new = $config_dir.'/'.$dest_target_new;
+ 
+@@ -1175,6 +1235,14 @@
+ 	--properties
+ 		If specified, include the dataset's properties in the stream.
+ 
++	--raw    boolean
++
++		Send the Snapshot in RAW Mode
++
++	--replicate      boolean
++
++		Replicate the Dataset with all Snapshots
++
+ 	--dest-config-path    string
+ 		Specifies a custom config path on the destination target.
+ 		The default is /var/lib/pve-zsync
+@@ -1215,6 +1283,14 @@
+ 	--properties
+ 		If specified, include the dataset's properties in the stream.
+ 
++        --raw    boolean
++
++                Send the Snapshot in RAW Mode
++
++        --replicate      boolean
++
++                Replicate the Dataset with all Snapshots
++
+ 	--dest-config-path    string
+ 		Specifies a custom config path on the destination target.
+ 		The default is /var/lib/pve-zsync
