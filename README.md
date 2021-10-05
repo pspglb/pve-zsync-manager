@@ -28,6 +28,14 @@ This results in automatically loading the dataset key and inheriting the parent 
 Almost every option supports a "--test" agrument. It will perform any neccessary read operation, but will not actually write anything.
 One can view all executed commands (or commands that would be executed without --test) with --verbose
 
+**Notes about the pve-zsync patch**
+
+The patch includes mainly four things:
+- It firstly locks the VM/CT before each sync, und unlocks it afterwards
+- Changes the location of the config file which is also backuped
+- Adds the ability to do replication snapshots, which include all intermediate snapshots
+- Adds the ability to do raw sync, for encrypted datasets
+
 **Installation:**
 
 Install Python3
