@@ -125,7 +125,7 @@ class Disk_Group:
 #Parses all zfs disks on the remote side (with an optional filter), and asks the user what should be done to each individual disk.
 def gather_restore_data(args):
     zfs_disks = check_zfs_pool(args.hostname, args.zfs_source_pool).split('\n')
-    zfs_disks = [element for element in zfs_disks if re.search('(subvol|vm)-\d+-disk-\d+', element)]
+    zfs_disks = [element for element in zfs_disks if re.search('(basevol|subvol|vm)-\d+-disk-\d+', element)]
 
     if args.filter is not None:
         zfs_disks = [element for element in zfs_disks if args.filter in element]
