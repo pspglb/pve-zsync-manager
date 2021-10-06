@@ -3,12 +3,17 @@
 import time
 import datetime
 import os
+import json
+import re
 from json.decoder import JSONDecodeError
 
 import pzm_common
-from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
+from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug, get_ids
 from pzm_locking import lock, unlock
+from pzm_sanitize import sanitize
 
+#Where errorlogs are stored
+logpath = "/var/log/pve-zsync"
 
 #Removed CT/VM IDs which no longer exist from the status file.
 def cleanup_json(delete = ""):

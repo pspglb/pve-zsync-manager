@@ -3,6 +3,7 @@
 import time
 import datetime
 import os
+import re
 
 import pzm_common
 from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
@@ -22,7 +23,7 @@ class Disk:
             log ("(SSH) ZFS command error: " + stderr)
             sys.exit(1)
         stdout = stdout.split('\n')
-        for x in set(stdout).intersection(considered_empty):
+        for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)
         last = [element for element in stdout if(backupname in element)]
 
@@ -39,7 +40,7 @@ class Disk:
             log ("(SSH) ls -l command error: " + stderr)
             sys.exit(1)
         stdout = stdout.split('\n')
-        for x in set(stdout).intersection(considered_empty):
+        for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)
         relevant_files = [element for element in stdout if(self.last_snapshot.split('@')[1] in element and self.id in element)]
         if len(relevant_files) > 0:
@@ -61,7 +62,7 @@ class Disk:
             sys.exit(1)
         stdout = stdout.split('\n\n')[0] #Read only first block of Configfile
         stdout = stdout.split('\n')
-        for x in set(stdout).intersection(considered_empty):
+        for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)
         diskconfig = [element for element in stdout if (self.name in element)]
         disk = ""
@@ -77,7 +78,7 @@ class Disk:
             log ("pvesm command error: " + stderr)
             sys.exit(1)
         destination = stdout.split('\n')
-        for x in set(destination).intersection(considered_empty):
+        for x in set(destination).intersection(pzm_common.considered_empty):
             destination.remove(x)
 
         if self.type == 'lxc':
@@ -128,7 +129,7 @@ def gather_restore_data(args):
 
     if args.filter is not None:
         zfs_disks = [element for element in zfs_disks if args.filter in element]
-    for x in set(zfs_disks).intersection(considered_empty):
+    for x in set(zfs_disks).intersection(pzm_common.considered_empty):
         zfs_disks.remove(x)
     zfs_disk_objects = []
 
@@ -199,7 +200,7 @@ def destroy_newer_snapshots(args, destination, snapshot):
     stdout = stdout.split('\n')
     index_of_snap = stdout.index(destination + '@' + snapshot.split('@')[1])
     snaps_to_delete = stdout[index_of_snap+1:]
-    for x in set(snaps_to_delete).intersection(considered_empty):
+    for x in set(snaps_to_delete).intersection(pzm_common.considered_empty):
         snaps_to_delete.remove(x)
     for snap in snaps_to_delete:
         if snap == "":
@@ -330,7 +331,7 @@ def restore(args, disk_groups):
                 snaps_in_config = execute_readonly_command(['qm', 'listsnapshot', group.id])[1]
             snaps_in_config = snaps_in_config.split('\n')
 
-            for x in set(snaps_in_config).intersection(considered_empty):
+            for x in set(snaps_in_config).intersection(pzm_common.considered_empty):
                 snaps_in_config.remove(x)
 
             snapnames_in_config = []
@@ -344,7 +345,7 @@ def restore(args, disk_groups):
             for disk in cleanup_disks:
                 rc, stdout, stderr = execute_readonly_command(['zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', disk.destination])
                 snapshots_on_disk = stdout.split('\n')
-                for x in set(snapshots_on_disk).intersection(considered_empty):
+                for x in set(snapshots_on_disk).intersection(pzm_common.considered_empty):
                     snapshots_on_disk.remove(x)
                 for snapshot_on_disk in snapshots_on_disk:
                     if not snapshot_on_disk.split('@')[1] in all_snaps_on_disks:

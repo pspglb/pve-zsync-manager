@@ -1,6 +1,7 @@
 #!/usr/bin/env -S python3 -u
 
 import subprocess
+import datetime
 
 def initialize():
     global initialized
@@ -8,19 +9,24 @@ def initialize():
     global test
     global statusJsonFile
     global considered_empty
-    
-    if not initialized:    
+
+
+    try:
+        initialized
+    except NameError:
         debug = False
         test = False
 
 
         statusJsonFile = "/var/lib/pve-zsync/manager_sync_state"
-        
 
-        logpath = "/var/log/pve-zsync"
+
         considered_empty = ['\n', '', " "]
         initialized = True
-        
+    else:
+        pass
+ 	#Initialized was defined, skip resetting values
+
 
 #Log to stdout
 def log(data):

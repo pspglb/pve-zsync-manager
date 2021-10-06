@@ -2,13 +2,14 @@ import time
 import datetime
 import os
 
-from pzm_common import execute_readonly_command, execute_command, log, log_debug
+import pzm_common
+from pzm_common import execute_readonly_command, execute_command, log, log_debug, get_ids
 
 #get the lastest snapshot of dataset, or zvol
 def get_latest_snapshot(dataset_name, backupname):
     rc, stdout, stderr = execute_readonly_command(['zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', dataset_name, '-S', 'creation'])
     stdout = stdout.split('\n')
-    for x in set(stdout).intersection(considered_empty):
+    for x in set(stdout).intersection(pzm_common.considered_empty):
         stdout.remove(x)
     snaps = [element for element in stdout if(backupname in element)]
     if len(snaps) > 0:
@@ -23,7 +24,7 @@ def parse_dataset(type, id):
     elif type == 'qemu':
         rc, stdout, stderr = execute_readonly_command(['qm', 'config', id])
     stdout = stdout.split('\n')
-    for x in set(stdout).intersection(considered_empty):
+    for x in set(stdout).intersection(pzm_common.considered_empty):
         stdout.remove(x)
     diskconfigs = [element for element in stdout if (id + '-disk' in element)]
     datasets = []
@@ -33,7 +34,7 @@ def parse_dataset(type, id):
 
         rc, stdout, stderr = execute_readonly_command(['pvesm', 'path', disk])
         dataset = stdout.split('\n')
-        for x in set(dataset).intersection(considered_empty):
+        for x in set(dataset).intersection(pzm_common.considered_empty):
             dataset.remove(x)
 
         if type == 'lxc':
@@ -91,7 +92,7 @@ def sanitize(args):
             #No need to check for return code, as it will be skipped in case of error
             if stdout != "":
                 stdout = stdout.split('\n')
-                for x in set(stdout).intersection(considered_empty):
+                for x in set(stdout).intersection(pzm_common.considered_empty):
                     stdout.remove(x)
                 if rollback_to in stdout:
                     if stdout.index(rollback_to) < len(stdout)-1:
@@ -107,7 +108,7 @@ def sanitize(args):
                 #No need to check for return code, as it will be skipped in case of error
                 if stdout != "":
                     stdout = stdout.split('\n')
-                    for x in set(stdout).intersection(considered_empty):
+                    for x in set(stdout).intersection(pzm_common.considered_empty):
                         stdout.remove(x)
                     if rollback_to in stdout:
                         if stdout.index(rollback_to) < len(stdout)-1:

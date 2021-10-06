@@ -4,6 +4,8 @@ import pzm_common
 from pzm_common import log, log_debug, execute_command, execute_readonly_command
 import os
 import socket
+import random
+import time
 
 remoteSyncLock = "/var/lib/pve-zsync/manager_sync.lock"
 locked = False

@@ -8,6 +8,7 @@ from pzm_restore import gather_restore_data, restore
 from pzm_sync import sync
 from pzm_sanitize import sanitize
 from pzm_locking import unlock
+from pzm_common import log, log_debug
 import pzm_common
 
 def main():

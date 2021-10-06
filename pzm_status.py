@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import pzm_common
+import os
+import json
 from prettytable import PrettyTable
 from json.decoder import JSONDecodeError
 
