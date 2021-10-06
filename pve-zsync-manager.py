@@ -14,6 +14,11 @@ import pzm_common
 
 def main():
     pzm_common.initialize()
+
+    if len(sys.argv) <= 2 and "status" not in sys.argv:
+        #status is the only method which can stand alone without params, everything also should append --help
+        sys.argv.append("--help")
+
     # Command: sync  - Arguments
     syncArgsParser = argparse.ArgumentParser()
 
@@ -67,6 +72,7 @@ def main():
     sanitizeArgsRequired.add_argument("--ids", help=" Use VM/CT Numbers, separated with commas, or use \"all\". Exclude with -number e.g --ids all,-1000", type=str, required=True)
     sanitizeArgsParser.add_argument("--verbose", help="Enable verbose mode", action="store_true")
     sanitizeArgsParser.add_argument("--test", help="Only test the functionality, do not actually execute anything", action="store_true")
+
 
     if "sync" in sys.argv:
         args = syncArgsParser.parse_args()
@@ -131,7 +137,7 @@ def main():
 
     #If no command is given
     else:
-        print ("ERROR: no command sepcified!")
+        print ("ERROR: no or invalid command sepcified!")
         print ("")
         print ("USAGE: ")
         print ("    " + sys.argv[0] + " status [OPTIONS]")
