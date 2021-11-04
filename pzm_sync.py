@@ -177,7 +177,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
             response = response + "ID " + id + " - ERROR - Took " + str(duration) +"\n"
             write_logfile(stderr, str(pid) + '.err')
             if not pzm_common.test:
-                write_to_json(id, backupname, starttime.strftime(timeformat), endtime.strftime(timeformat), str(duration), "error", "-" ,"Errorlog at " + os.path.join(logpath,str(pid) + ".err"))
+                write_to_json(id, backupname, starttime.strftime(timeformat), endtime.strftime(timeformat), str(duration), "-", "error" ,"Errorlog at " + os.path.join(logpath,str(pid) + ".err"))
         else:
             log ("ID " + id + " done successfully with " + str (tries+1) + " attempts. Took " + str(duration))
             response = response + "ID " + id + " - OK! - Took " + str(duration) + "\n"
