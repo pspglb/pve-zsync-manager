@@ -2,6 +2,7 @@
 
 import subprocess
 import datetime
+import sys
 
 def initialize():
     global initialized
