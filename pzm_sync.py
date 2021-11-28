@@ -45,7 +45,7 @@ def cleanup_json(delete = ""):
                      'info': data['info']
                  }
         with open(pzm_common.statusJsonFile, "w") as jsonFile:
-            json.dump(newData, jsonFile)
+            json.dump(newData, jsonFile, indent=4)
 
 #Delete logfiles from errored syncs if they are older than 7 days.
 def cleanup_logfolder():
@@ -83,7 +83,7 @@ def write_to_json(id, backupname, starttime, endtime, duration, size, status, in
         'info': info
     }
     with open(pzm_common.statusJsonFile, "w") as jsonFile:
-        json.dump(data, jsonFile)
+        json.dump(data, jsonFile, indent=4)
 
 
 
