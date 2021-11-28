@@ -17,6 +17,50 @@ class Disk:
         id = self.name.split('-')[1]
         return id
 
+    def get_unique_name(self, hostname, config_file):
+        rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', config_file])
+        if (rc != 0):
+            log ("(SSH) Get config path command error: " + stderr)
+            sys.exit(1)
+        stdout = stdout.split('\n\n')[0] #Read only first block of Configfile
+        stdout = stdout.split('\n')
+        for x in set(stdout).intersection(pzm_common.considered_empty):
+            stdout.remove(x)
+        diskconfig = [element for element in stdout if (self.name in element)]
+        disk = ""
+        if len(diskconfig) == 1:
+            disk = diskconfig[0].split(',')[0].split(':',1)[1].replace(' ','') #from for example rootfs: vmssd:subvol-100-disk-0,mountpoint=.... to vmssd:subvol-100-disk-0
+        elif len(diskconfig) > 1: #Must have used the new prepent-dataset-id flag of pve-zsync, as pve-zsync would not work in that case
+            #we get the destination pool from full_names pre last dataset name which is the pve-storage id if it was sent with prepent-dataset-id
+            #Example: backuppool/vmsys/subvol-100-disk-0: self.full_name.split('/')[-2] will be "vmsys", self.name subvol-100-disk-0
+            disk = self.full_name.split('/')[-2] + ':'+ self.name
+
+
+        #disk: "<storage_pool>:<disk_identification>" this has to be unique for each disk
+        self.unique_name = disk
+
+    def get_destination(self):
+        rc, stdout, stderr = execute_readonly_command(['pvesm', 'path', self.unique_name])
+        if (rc != 0):
+            log ("pvesm command error: " + stderr)
+            sys.exit(1)
+        destination = stdout.split('\n')
+        for x in set(destination).intersection(pzm_common.considered_empty):
+            destination.remove(x)
+
+        if self.type == 'lxc':
+            destination = destination[0].split('/',1)[1]
+        elif  self.type == 'qemu':
+            destination = destination[0].split('/dev/zvol/',1)[1]
+        else:
+            destination = ""
+        return destination
+
+    def __init__(self):
+        self.unique_name = ""
+
+
+class Backuped_Disk(Disk):
     def get_last_snapshot(self, hostname, backupname):
         rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', self.full_name])
         if (rc != 0):
@@ -55,41 +99,8 @@ class Disk:
             self.skip = True #No Config File for this disk found, skip
             return None
 
-    def get_destination(self, hostname, configs_path):
-        rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', configs_path + '/' + self.last_config])
-        if (rc != 0):
-            log ("(SSH) Get config path command error: " + stderr)
-            sys.exit(1)
-        stdout = stdout.split('\n\n')[0] #Read only first block of Configfile
-        stdout = stdout.split('\n')
-        for x in set(stdout).intersection(pzm_common.considered_empty):
-            stdout.remove(x)
-        diskconfig = [element for element in stdout if (self.name in element)]
-        disk = ""
-        if len(diskconfig) == 1:
-            disk = diskconfig[0].split(',')[0]
-            disk = disk.split(':',1)[1].replace(' ','')
-        elif len(diskconfig) > 1: #Must have used the new prepent-dataset-id flag of pve-zsync, as pve-zsync would not work in that case
-            #we get the destination pool from full_names pre last dataset name which is the pve-storage id if it was sent with prepent-dataset-id
-            disk = self.full_name.split('/')[-2] + ':'+ self.name
-
-        rc, stdout, stderr = execute_readonly_command(['pvesm', 'path', disk])
-        if (rc != 0):
-            log ("pvesm command error: " + stderr)
-            sys.exit(1)
-        destination = stdout.split('\n')
-        for x in set(destination).intersection(pzm_common.considered_empty):
-            destination.remove(x)
-
-        if self.type == 'lxc':
-            destination = destination[0].split('/',1)[1]
-        elif  self.type == 'qemu':
-            destination = destination[0].split('/dev/zvol/',1)[1]
-        else:
-            destination = ""
-        return destination
-
     def __init__(self, hostname, full_name, backupname, configs_path):
+        super().__init__()
         self.restore = False
         self.rollback = False
         self.keep = False
@@ -103,7 +114,16 @@ class Disk:
         self.last_config = self.get_last_config(hostname, configs_path)
         if self.skip: # Can be set in get_last_config
             return
-        self.destination = self.get_destination(hostname, configs_path)
+        self.get_unique_name(hostname, configs_path + '/' + self.last_config)
+        self.destination = self.get_destination()
+
+class Non_Backuped_Disk(Disk):
+    def __init__(self, config_file, unique_name, type):
+        super().__init__()
+        self.unique_name = unique_name
+        self.type = type
+        self.destination = self.get_destination()
+        self.recreate = False
 
 
 #Each CT/VM can have multiple disks. A disc group represents all disks of a VM/CT
@@ -111,9 +131,30 @@ class Disk_Group:
     def __init__(self, id, type, last_config):
         self.skip = False
         self.id = id
-        self.disks = []
+        self.backuped_disks:list[Backuped_Disk] = []
+        self.non_backuped_disks:list[Non_Backuped_Disk] = []
         self.type = type
         self.last_config = last_config
+
+    # Parse additional mountpoints or disks, which are not yet it the disks list
+    def find_non_backuped_disks(self, hostname, configs_path):
+        rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', configs_path + '/' + self.last_config])
+        if (rc != 0):
+            log ("(SSH) Get config path command error: " + stderr)
+            sys.exit(1)
+        stdout = stdout.split('\n\n')[0] #Read only first block of Configfile
+        stdout = stdout.split('\n')
+        for x in set(stdout).intersection(pzm_common.considered_empty):
+            stdout.remove(x)
+        all_disks = [element.split(',')[0].split(':',1)[1].replace(' ','') for element in stdout if f"-{self.id}-disk-" in element]
+
+
+        #Only use disks, which were not found at the backup location
+        parsed_non_backuped_disks = [element for element in all_disks if len([backuped_disk for backuped_disk in self.backuped_disks if element in backuped_disk.unique_name]) == 0]
+
+
+        for parsed_non_backuped_disk in parsed_non_backuped_disks:
+            self.non_backuped_disks.append(Non_Backuped_Disk(configs_path + '/' + self.last_config, parsed_non_backuped_disk, self.type))
 
     def __eq__(self,other):
         if not isinstance(other, Disk_Group):
@@ -131,42 +172,45 @@ def gather_restore_data(args):
         zfs_disks = [element for element in zfs_disks if args.filter in element]
     for x in set(zfs_disks).intersection(pzm_common.considered_empty):
         zfs_disks.remove(x)
-    zfs_disk_objects = []
 
     if pzm_common.debug:
         print ("Disks found after filter: " + str(zfs_disks))
 
+    zfs_found_disk_objects:list[Backuped_Disk] = []
     for zfs_disk in zfs_disks:
         if args.zfs_source_pool + '/' in zfs_disk:
-            zfs_disk_objects.append(Disk(args.hostname, zfs_disk, args.backupname, args.config_path))
-            if zfs_disk_objects[-1].skip:
-                zfs_disk_objects.pop()
+            disk = Backuped_Disk(args.hostname, zfs_disk, args.backupname, args.config_path)
+            if not disk.skip:
+                zfs_found_disk_objects.append(disk)
+
     disk_groups = []
-    for disk in zfs_disk_objects:
+    for disk in zfs_found_disk_objects:
         if not Disk_Group(disk.id, None, None) in disk_groups:
             group = Disk_Group(disk.id, disk.type, disk.last_config)
-            group.disks.append(disk)
+            group.backuped_disks.append(disk)
             disk_groups.append(group)
         else:
-            disk_groups[disk_groups.index(Disk_Group(disk.id, None, None))].disks.append(disk)
-
+            disk_groups[disk_groups.index(Disk_Group(disk.id, None, None))].backuped_disks.append(disk)
 
     for group in disk_groups:
+        #Disks which were not found in the specified backup location, but are defined in the configuration
+        group.find_non_backuped_disks(args.hostname, args.config_path)
+
         print ("ID: " + group.id)
-        for disk in group.disks:
-            input_data = input ("Restore Disk from " + disk.last_snapshot + " to " + disk.destination + "? (y/n): ")
+        for disk in group.backuped_disks:
+            input_data = input ("Restore Disk from " + disk.last_snapshot + " to " + disk.destination + "? (y/n): ").lower()
             while not (input_data == 'y' or input_data == 'n'):
-                input_data = input ("Please answer y/n: ")
+                input_data = input ("Please answer y/n: ").lower()
             if input_data == 'y':
                disk.restore = True
-        no_restore_disks = [element for element in group.disks if (element.restore == False)]
-        restore_disks = [element for element in group.disks if (element.restore == True)]
-        if len(group.disks) > len(restore_disks):
+        no_restore_disks = [element for element in group.backuped_disks if (element.restore == False)]
+        restore_disks = [element for element in group.backuped_disks if (element.restore == True)]
+        if len(group.backuped_disks) > len(restore_disks):
             if len(restore_disks) > 0:
                 for no_restore_disk in no_restore_disks:
-                    input_data = input ("Fate of " + no_restore_disk.full_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ")
+                    input_data = input ("Fate of " + no_restore_disk.unique_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ").lower()
                     while not (input_data == 'rollback' or input_data == 'keep'):
-                        input_data = input ("Please answer rollback/keep: ")
+                        input_data = input ("Please answer rollback/keep: ").lower()
                     if input_data == 'rollback':
                         no_restore_disk.rollback = True
                     elif input_data == 'keep':
@@ -175,20 +219,35 @@ def gather_restore_data(args):
                 group.skip = True
         if len(restore_disks) == 0:
             group.skip = True
+
+        if not group.skip:
+            for non_backuped_disk in group.non_backuped_disks:
+                input_data = input ("Disk " + non_backuped_disk.unique_name + " was not backuped. Should it be recreated? (y/n): ").lower()
+                while not (input_data == 'y' or input_data == 'n'):
+                    input_data = input ("Please answer y/n: ").lower()
+                if input_data == 'y':
+                    non_backuped_disk.recreate = True
+
     print ("\n\nPlease check restore configuration:")
     for group in disk_groups:
         if group.skip:
             print ("ID: " + group.id + " skipped!")
             continue
         print ("ID: " + group.id + ":")
-        for disk in group.disks:
-            if disk.restore:
-                print ("RESTORE: " +  disk.name + " from " + disk.last_snapshot + " to " + disk.destination + ": ")
-            elif disk.rollback:
-                print ("ROLLBACK: " + disk.name + " to " + disk.destination + disk.last_snapshot.split('@')[1])
-            elif disk.keep:
-                print ("KEEP DATA: " + disk.destination)
-    input_data = input ("\nIs the information correct? (y):")
+        for backuped_disk in group.backuped_disks:
+            if backuped_disk.restore:
+                print ("RESTORE: " +  backuped_disk.unique_name + " from " + backuped_disk.last_snapshot + " to " + backuped_disk.destination + ": ")
+            elif backuped_disk.rollback:
+                print ("ROLLBACK: " + backuped_disk.unique_name + " to " + backuped_disk.destination + backuped_disk.last_snapshot.split('@')[1])
+            elif backuped_disk.keep:
+                print ("KEEP DATA: " + backuped_disk.destination)
+        for non_backuped_disk in group.non_backuped_disks:
+            if non_backuped_disk.recreate:
+                print ("RECREATE: " + non_backuped_disk.unique_name + " to " + non_backuped_disk.destination)
+            else:
+                print ("DON'T RECREATE: " + non_backuped_disk.unique_name)
+
+    input_data = input ("\nIs the information correct? (y):".lower())
     if input_data == 'y':
        return disk_groups
     else:
@@ -260,7 +319,7 @@ def restore(args, disk_groups):
                 continue
         no_restore_count = 0
 
-        for disk in group.disks:
+        for disk in group.backuped_disks:
             if disk.restore:
                 print ("VM/CT ID " + group.id + " - restoring " + disk.destination)
                 rc, stdout, stderr = execute_readonly_command(['zfs', 'list', disk.destination])
@@ -324,7 +383,7 @@ def restore(args, disk_groups):
 
         ## Force Delete PVE Snapshots which are not on all disks
         if no_restore_count > 0:
-            cleanup_disks = [ element for element in group.disks if not ( element.restore )]
+            cleanup_disks = [ element for element in group.backuped_disks if not ( element.restore )]
             if group.type == "lxc":
                 snaps_in_config = execute_readonly_command(['pct', 'listsnapshot', group.id])[1]
             elif group.type == "qemu":
@@ -360,6 +419,10 @@ def restore(args, disk_groups):
                     elif group.type == "qemu":
                         print ("Deleting Snapshot " + snapname_in_config + " because it's not present on all disks")
                         execute_command(['qm', 'delsnapshot', group.id, snapname_in_config, '--force'])
+
+        for non_backuped_disk in group.non_backuped_disks:
+            if non_backuped_disk.recreate:
+                print ("Recreating " + disk.unique_name)
 
         print ("VM/CT ID " + group.id + " finished!")
     unlock(args.hostname)
