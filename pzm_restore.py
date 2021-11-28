@@ -10,6 +10,10 @@ from pzm_common import execute_readonly_command, execute_command, check_zfs_pool
 from pzm_locking import lock, unlock
 
 
+def get_unique_name_from_config_line(config_line):
+    #from for example rootfs: vmssd:subvol-100-disk-0,mountpoint=.... to vmssd:subvol-100-disk-0
+    return config_line.split(',')[0].split(':',1)[1].replace(' ','')
+
 #Disc class for the restore function.
 #Each disk has a Name/ID, latest snaoshot, destination (aka pool) and a vm/ct config file
 class Disk:
@@ -29,7 +33,7 @@ class Disk:
         diskconfig = [element for element in stdout if (self.name in element)]
         disk = ""
         if len(diskconfig) == 1:
-            disk = diskconfig[0].split(',')[0].split(':',1)[1].replace(' ','') #from for example rootfs: vmssd:subvol-100-disk-0,mountpoint=.... to vmssd:subvol-100-disk-0
+            disk = get_unique_name_from_config_line(diskconfig[0])
         elif len(diskconfig) > 1: #Must have used the new prepent-dataset-id flag of pve-zsync, as pve-zsync would not work in that case
             #we get the destination pool from full_names pre last dataset name which is the pve-storage id if it was sent with prepent-dataset-id
             #Example: backuppool/vmsys/subvol-100-disk-0: self.full_name.split('/')[-2] will be "vmsys", self.name subvol-100-disk-0
@@ -146,7 +150,7 @@ class Disk_Group:
         stdout = stdout.split('\n')
         for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)
-        all_disks = [element.split(',')[0].split(':',1)[1].replace(' ','') for element in stdout if f"-{self.id}-disk-" in element]
+        all_disks = [get_unique_name_from_config_line(element) for element in stdout if f"-{self.id}-disk-" in element]
 
 
         #Only use disks, which were not found at the backup location
