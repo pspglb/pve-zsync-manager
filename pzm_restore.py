@@ -4,6 +4,7 @@ import time
 import datetime
 import os
 import re
+import sys
 
 import pzm_common
 from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
@@ -133,17 +134,27 @@ class Non_Backuped_Disk(Disk):
 
 #Each CT/VM can have multiple disks. A disc group represents all disks of a VM/CT
 class Disk_Group:
-    def __init__(self, id, type, last_config):
+    def __init__(self, id, type):
         self.skip = False
         self.id = id
         self.backuped_disks:list[Backuped_Disk] = []
         self.non_backuped_disks:list[Non_Backuped_Disk] = []
         self.type = type
-        self.last_config = last_config
+
+    def get_last_config(self):
+        configs = [disk.last_config for disk in self.backuped_disks]
+        if configs is not None and len(configs) > 0:
+            configs.sort(reverse=True)
+            return configs[0]
+        else:
+            return None
 
     # Parse additional mountpoints or disks, which are not yet it the disks list
     def find_non_backuped_disks(self, hostname, configs_path):
-        rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', configs_path + '/' + self.last_config])
+        if self.get_last_config() == None:
+            return #Without any config, we can't check the remote config....
+
+        rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', configs_path + '/' + self.get_last_config()])
         if (rc != 0):
             log ("(SSH) Get config path command error: " + stderr)
             sys.exit(1)
@@ -159,7 +170,7 @@ class Disk_Group:
 
 
         for config_line in parsed_non_backuped_disk_config_lines:
-            self.non_backuped_disks.append(Non_Backuped_Disk(configs_path + '/' + self.last_config, config_line, self.type))
+            self.non_backuped_disks.append(Non_Backuped_Disk(configs_path + '/' + self.get_last_config(), config_line, self.type))
 
     def __eq__(self,other):
         if not isinstance(other, Disk_Group):
@@ -190,12 +201,12 @@ def gather_restore_data(args):
 
     disk_groups = []
     for disk in zfs_found_disk_objects:
-        if not Disk_Group(disk.id, None, None) in disk_groups:
-            group = Disk_Group(disk.id, disk.type, disk.last_config)
+        if not Disk_Group(disk.id, None) in disk_groups:
+            group = Disk_Group(disk.id, disk.type)
             group.backuped_disks.append(disk)
             disk_groups.append(group)
         else:
-            disk_groups[disk_groups.index(Disk_Group(disk.id, None, None))].backuped_disks.append(disk)
+            disk_groups[disk_groups.index(Disk_Group(disk.id, None))].backuped_disks.append(disk)
 
     for group in disk_groups:
         #Disks which were not found in the specified backup location, but are defined in the configuration
@@ -306,7 +317,7 @@ def restore(args, disk_groups):
             #    print (stderr)
             #    continue
 
-            rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.last_config, '/etc/pve/lxc/' + group.id + '.conf'])
+            rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.get_last_config(), '/etc/pve/lxc/' + group.id + '.conf'])
             if rc != 0:
                 print (stdout)
                 print (stderr)
@@ -323,7 +334,7 @@ def restore(args, disk_groups):
                 print (stderr)
                 continue
 
-            rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.last_config, '/etc/pve/qemu-server/' + group.id + '.conf'])
+            rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.get_last_config(), '/etc/pve/qemu-server/' + group.id + '.conf'])
             if rc != 0:
                 print (stdout)
                 print (stderr)
@@ -392,36 +403,50 @@ def restore(args, disk_groups):
         for non_backuped_disk in group.non_backuped_disks:
             if non_backuped_disk.recreate:
                 print ("VM/CT ID " + group.id + " - Recreating " + non_backuped_disk.unique_name)
+                config = []
+                config_new = []
                 if group.type == "lxc":
-                    config = []
-                    config_new = []
                     with open('/etc/pve/lxc/' + group.id + '.conf', 'r') as config_file:
                         config = config_file.readlines()
+                elif group.type == "qemu":
+                    with open('/etc/pve/qemu-server/' + group.id + '.conf', 'r') as config_file:
+                        config = config_file.readlines()
 
-                    for line in config:
-                        if non_backuped_disk.unique_name not in line.replace(' ',''):
-                            config_new.append(line)
 
-                    if not pzm_common.test:
-                        print("VM/CT ID " + group.id + " - Removing " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+                for line in config:
+                    if non_backuped_disk.unique_name not in line.replace(' ',''):
+                        config_new.append(line)
+
+                if not pzm_common.test:
+                    print("VM/CT ID " + group.id + " - Removing " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+                    if group.type == "lxc":
                         with open('/etc/pve/lxc/' + group.id + '.conf', 'w') as config_file:
                             config_file.writelines(config_new)
-                    else:
-                        print("VM/CT ID " + group.id + " - Would remove " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+                    elif group.type == "qemu":
+                        with open('/etc/pve/qemu-server/' + group.id + '.conf', 'w') as config_file:
+                            config_file.writelines(config_new)
+                else:
+                    print("VM/CT ID " + group.id + " - Would remove " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
 
-                    #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
-                    #options: "mp=/test,backup=1,size=8G" as list
-                    options = non_backuped_disk.config_line.split(',',1)[1].split(',')
-                    mp_id = non_backuped_disk.config_line.split(':', 1)[0]
-                    #from "size=8G" to "8"
-                    size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
-                    #unique_name "vmsys:subvol-100-disk-1"
-                    storage_pool = non_backuped_disk.unique_name.split(':')[0]
-                    rc, stdout, stderr, pid = execute_command(['pct', 'set', group.id, f'--{mp_id}', f"{storage_pool}:{size},{','.join(options)}"])
-                    if rc != 0:
-                        print (stdout)
-                        print (stderr)
-                        continue
+                #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
+                #options: "mp=/test,backup=1,size=8G" as list
+                options = non_backuped_disk.config_line.split(',',1)[1].split(',')
+                #hardware_id: mp1, scsi1, sata1 etc
+                hardware_id = non_backuped_disk.config_line.split(':', 1)[0]
+                #from "size=8G" to "8"
+                size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
+                #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
+
+                storage_pool = non_backuped_disk.unique_name.split(':')[0]
+                command = ""
+                if group.type == "lxc": command = "pct"
+                if group.type == "qemu": command = "qm"
+                rc, stdout, stderr, pid = execute_command([command,  'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size},{','.join(options)}"])
+                if rc != 0:
+                    print (stdout)
+                    print (stderr)
+                    continue
+
 
 
         if group.type == "lxc":
@@ -476,29 +501,32 @@ def restore(args, disk_groups):
                     if snapname_in_config in snapshots_on_disk: #If a snapshot which is in the config is also on disk
                         continue #Then it's okay
                     else: #If it's in the config, but not on disk
-                        if group.type == "lxc":
-                            rc, stdout, stderr = execute_readonly_command(['pct', 'config', group.id, '--snapshot', snapname_in_config])
-                            if disk.unique_name in stdout:
-                                if not pzm_common.test:
-                                    print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
-                                    #Delete this snapshot from the config
-                                    #Read all lines from config, search for the snapshot name, delete the whole line where disk.unique_name is found at the next occourance
-                                    found_snapshot = False
-                                    config_tmp = []
-                                    for line in config_new:
-                                        if snapname_in_config in line and not "parent" in line: #Found snapshot header. Can only occour once in config file
-                                            found_snapshot = True
-                                        if found_snapshot and disk.unique_name in line:
-                                            #the snapshot was found previously and the line matches, skip writing that line, and set found_snapshot to False again
-                                            #so it doesn't skip further occourance
-                                            found_snapshot = False
-                                        else:
-                                            config_tmp.append(line)
-                                    config_new = config_tmp
-                                else:
-                                    print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                        command = ""
+                        if group.type == "lxc": command = "pct"
+                        if group.type == "qemu": command = "qm"
+                       
+                        rc, stdout, stderr = execute_readonly_command([command, 'config', group.id, '--snapshot', snapname_in_config])
+                        if disk.unique_name in stdout:
+                            if not pzm_common.test:
+                                print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                                #Delete this snapshot from the config
+                                #Read all lines from config, search for the snapshot name, delete the whole line where disk.unique_name is found at the next occourance
+                                found_snapshot = False
+                                config_tmp = []
+                                for line in config_new:
+                                    if snapname_in_config in line and not "parent" in line: #Found snapshot header. Can only occour once in config file
+                                        found_snapshot = True
+                                    if found_snapshot and disk.unique_name in line:
+                                        #the snapshot was found previously and the line matches, skip writing that line, and set found_snapshot to False again
+                                        #so it doesn't skip further occourance
+                                        found_snapshot = False
+                                    else:
+                                        config_tmp.append(line)
+                                config_new = config_tmp
                             else:
-                                print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " OK!")
+                                print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                        else:
+                            print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " OK!")
 
             if len(config) != len(config_new):
                 if not pzm_common.test:
