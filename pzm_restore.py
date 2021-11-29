@@ -283,7 +283,8 @@ def gather_restore_data(args):
             elif not non_backed_up_disk.skip:
                 print ("DON'T RECREATE: " + non_backed_up_disk.unique_name)
 
-    input_data = input ("\nIs the information correct? (y):".lower())
+    print ("")
+    input_data = input ("Is the information correct? (y): ".lower())
     if input_data == 'y':
        return disk_groups
     else:
