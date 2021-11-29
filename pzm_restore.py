@@ -531,11 +531,16 @@ def restore(args, disk_groups):
                     else:
                         if pzm_common.debug: print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " is OK!")
 
-            print ("VM/CT ID " + group.id + " - Deleted " + str(current_config_len - len(config_new)) + " non existing snapshots of " + disk.unique_name + " in config file")
+
+            deleted_lines = current_config_len - len(config_new)
+            if deleted_lines == 0:
+                print ("VM/CT ID " + group.id + " - No entries of " + disk.unique_name + " deleted, snapshots are consistent")
+            else:
+                print ("VM/CT ID " + group.id + " - Deleted " + disk.unique_name + " from " + str(deleted_lines) + " snapshot entries, as the snapshots can't be found on disk")
 
 
         if len(config) != len(config_new): #Config must have changed, if string list isn't of the same length anymore
-            print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
+            #print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
             if not pzm_common.test:
                 if pzm_common.debug: print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
                 if group.type == "lxc":
@@ -543,8 +548,8 @@ def restore(args, disk_groups):
                         config_file.writelines(config_new)
             else:
                 if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
-        else:
-            print ("VM/CT ID " + group.id + " - Snapshots of config all exist on disk, nothing to cleanup")
+        #else:
+        #    print ("VM/CT ID " + group.id + " - Snapshots of config all exist on disk, nothing to cleanup")
 
         #Unlock before next group
         if group.type == "lxc":
