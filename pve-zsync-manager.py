@@ -79,7 +79,9 @@ def main():
             log ("Sync started with: " + ' '.join(sys.argv[0:]))
             sync(args)
         except KeyboardInterrupt:
-            log ("Interupted by User")
+            log ("\nInterupted by User")
+            unlock(args.hostname)
+        except Exception: #Also unlock at any other exception
             unlock(args.hostname)
 
 
@@ -99,13 +101,15 @@ def main():
         try:
             disk_groups = gather_restore_data(args)
         except KeyboardInterrupt:
-            print ("Interupted by User")
+            print ("\nInterupted by User")
             sys.exit(1)
         if disk_groups is not None:
             try:
                 restore(args, disk_groups)
             except KeyboardInterrupt:
-                print ("Interupted by User")
+                print ("\nInterupted by User")
+                unlock(args.hostname)
+            except Exception: #Also unlock at any other exception
                 unlock(args.hostname)
 
 
@@ -117,7 +121,10 @@ def main():
             print ("Debug mode")
         if pzm_common.test:
             print ("Test mode")
-        sanitize(args)
+        try:
+            sanitize(args)
+        except KeyboardInterrupt:
+                print ("\nInterupted by User")
 
     #If no command is given
     else:
