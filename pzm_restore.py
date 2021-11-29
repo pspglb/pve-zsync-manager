@@ -490,7 +490,8 @@ def restore(args, disk_groups):
 
         config_new = config.copy() #Copy to have to have the reference
         for disk in cleanup_disks:
-            print ("VM/CT ID " + group.id + " - Checking " + disk.unique_name)
+            current_config_len = len(config_new) #To give the user an indication how much was changed per disk
+
             rc, stdout, stderr = execute_readonly_command(['zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', disk.destination])
             snapshots_on_disk = stdout.split('\n')
             for x in set(snapshots_on_disk).intersection(pzm_common.considered_empty):
@@ -529,6 +530,9 @@ def restore(args, disk_groups):
                             if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
                     else:
                         if pzm_common.debug: print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " is OK!")
+
+            print ("VM/CT ID " + group.id + " - Deleted " + str(current_config_len - len(config_new)) + " non existing snapshots of " + disk.unique_name + " in config file")
+
 
         if len(config) != len(config_new): #Config must have changed, if string list isn't of the same length anymore
             print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
