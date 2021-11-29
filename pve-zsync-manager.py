@@ -2,6 +2,7 @@
 
 import sys
 import argparse
+import traceback
 
 from pzm_status import read_from_json
 from pzm_restore import gather_restore_data, restore
@@ -82,6 +83,7 @@ def main():
             log ("\nInterupted by User")
             unlock(args.hostname)
         except Exception: #Also unlock at any other exception
+            print(traceback.format_exc())
             unlock(args.hostname)
 
 
@@ -110,6 +112,7 @@ def main():
                 print ("\nInterupted by User")
                 unlock(args.hostname)
             except Exception: #Also unlock at any other exception
+                print(traceback.format_exc())
                 unlock(args.hostname)
 
 
