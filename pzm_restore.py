@@ -344,10 +344,10 @@ def restore(args, disk_groups):
             execute_command(['qm', 'set', group.id, '--lock=backup'])
 
             rc, stdout, stderr, pid = execute_command(['mv', '/etc/pve/qemu-server/' + group.id + '.conf', '/etc/pve/qemu-server/' + group.id + '.conf.backup'])
-            if rc != 0:
-                print (stdout)
-                print (stderr)
-                continue
+            #if rc != 0:
+            #    print (stdout)
+            #    print (stderr)
+            #    continue
 
             rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.get_last_config(), '/etc/pve/qemu-server/' + group.id + '.conf'])
             if rc != 0:
