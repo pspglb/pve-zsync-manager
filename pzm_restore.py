@@ -66,7 +66,7 @@ class Disk:
         self.skip = False
 
 
-class Backuped_Disk(Disk):
+class Backed_Up_Disk(Disk):
     def get_last_snapshot(self, hostname, backupname):
         rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', self.full_name])
         if (rc != 0):
@@ -122,7 +122,7 @@ class Backuped_Disk(Disk):
         self.get_unique_name(hostname, configs_path + '/' + self.last_config)
         self.destination = self.get_destination()
 
-class Non_Backuped_Disk(Disk):
+class Non_Backed_Up_Disk(Disk):
     def __init__(self, config_file, config_line, type):
         super().__init__()
         self.unique_name = get_unique_name_from_config_line(config_line)
@@ -137,12 +137,12 @@ class Disk_Group:
     def __init__(self, id, type):
         self.skip = False
         self.id = id
-        self.backuped_disks:list[Backuped_Disk] = []
-        self.non_backuped_disks:list[Non_Backuped_Disk] = []
+        self.backed_up_disks:list[Backed_Up_Disk] = []
+        self.non_backed_up_disks:list[Non_Backed_Up_Disk] = []
         self.type = type
 
     def get_last_config(self):
-        configs = [disk.last_config for disk in self.backuped_disks]
+        configs = [disk.last_config for disk in self.backed_up_disks]
         if configs is not None and len(configs) > 0:
             #100.conf.qemu.rep_backup-name_2021-11-27_00:13:50
             configs.sort(key = lambda x: '_'.join([x.split('_')[-2], x.split('_')[-1]]),reverse=True)
@@ -151,7 +151,7 @@ class Disk_Group:
             return None
 
     # Parse additional mountpoints or disks, which are not yet it the disks list
-    def find_non_backuped_disks(self, hostname, configs_path):
+    def find_non_backed_up_disks(self, hostname, configs_path):
         if self.get_last_config() == None:
             return #Without any config, we can't check the remote config....
 
@@ -167,11 +167,11 @@ class Disk_Group:
 
 
         #Only use disks, which were not found at the backup location
-        parsed_non_backuped_disk_config_lines = [element for element in all_disks if len([backuped_disk for backuped_disk in self.backuped_disks if get_unique_name_from_config_line(element) in backuped_disk.unique_name]) == 0]
+        parsed_non_backed_up_disk_config_lines = [element for element in all_disks if len([backed_up_disk for backed_up_disk in self.backed_up_disks if get_unique_name_from_config_line(element) in backed_up_disk.unique_name]) == 0]
 
 
-        for config_line in parsed_non_backuped_disk_config_lines:
-            self.non_backuped_disks.append(Non_Backuped_Disk(configs_path + '/' + self.get_last_config(), config_line, self.type))
+        for config_line in parsed_non_backed_up_disk_config_lines:
+            self.non_backed_up_disks.append(Non_Backed_Up_Disk(configs_path + '/' + self.get_last_config(), config_line, self.type))
 
     def __eq__(self,other):
         if not isinstance(other, Disk_Group):
@@ -182,6 +182,7 @@ class Disk_Group:
 
 #Parses all zfs disks on the remote side (with an optional filter), and asks the user what should be done to each individual disk.
 def gather_restore_data(args):
+    print ("Gathering data from remote side, please wait...")
     zfs_disks = check_zfs_pool(args.hostname, args.zfs_source_pool).split('\n')
     zfs_disks = [element for element in zfs_disks if re.search('(basevol|subvol|vm)-\d+-disk-\d+', element)]
 
@@ -193,10 +194,10 @@ def gather_restore_data(args):
     if pzm_common.debug:
         print ("Disks found after filter: " + str(zfs_disks))
 
-    zfs_found_disk_objects:list[Backuped_Disk] = []
+    zfs_found_disk_objects:list[Backed_Up_Disk] = []
     for zfs_disk in zfs_disks:
         if args.zfs_source_pool + '/' in zfs_disk:
-            disk = Backuped_Disk(args.hostname, zfs_disk, args.backupname, args.config_path)
+            disk = Backed_Up_Disk(args.hostname, zfs_disk, args.backupname, args.config_path)
             if not disk.skip: #If it was skipped during detection, we don't need to bother anymore
                 zfs_found_disk_objects.append(disk)
 
@@ -204,17 +205,18 @@ def gather_restore_data(args):
     for disk in zfs_found_disk_objects:
         if not Disk_Group(disk.id, None) in disk_groups:
             group = Disk_Group(disk.id, disk.type)
-            group.backuped_disks.append(disk)
+            group.backed_up_disks.append(disk)
             disk_groups.append(group)
         else:
-            disk_groups[disk_groups.index(Disk_Group(disk.id, None))].backuped_disks.append(disk)
+            disk_groups[disk_groups.index(Disk_Group(disk.id, None))].backed_up_disks.append(disk)
 
+    print ("")
     for group in disk_groups:
         #Disks which were not found in the specified backup location, but are defined in the configuration
-        group.find_non_backuped_disks(args.hostname, args.config_path)
+        group.find_non_backed_up_disks(args.hostname, args.config_path)
 
         print ("ID: " + group.id)
-        for disk in group.backuped_disks:
+        for disk in group.backed_up_disks:
             input_data = input ("Restore Disk from " + disk.last_snapshot + " to " + disk.destination + "? (y/n): ").lower()
             while not (input_data == 'y' or input_data == 'n'):
                 input_data = input ("Please answer y/n: ").lower()
@@ -222,9 +224,9 @@ def gather_restore_data(args):
                 disk.restore = True
 
         print ("")
-        no_restore_disks = [element for element in group.backuped_disks if (element.restore == False)]
-        restore_disks = [element for element in group.backuped_disks if (element.restore == True)]
-        if len(group.backuped_disks) > len(restore_disks):
+        no_restore_disks = [element for element in group.backed_up_disks if (element.restore == False)]
+        restore_disks = [element for element in group.backed_up_disks if (element.restore == True)]
+        if len(group.backed_up_disks) > len(restore_disks):
             if len(restore_disks) > 0: #Only ask for other disks in a CT, if at minimum one disk has to be restored
                 for no_restore_disk in no_restore_disks:
                     #Check if it exists locally or if it's in the config, if not, warn user about it later that the The VM/CT will be restored in a broken state
@@ -247,16 +249,16 @@ def gather_restore_data(args):
             group.skip = True
 
         if not group.skip:
-            for non_backuped_disk in group.non_backuped_disks:
-                rc, stdout, stderr = execute_readonly_command(['zfs', 'list', non_backuped_disk.destination])
+            for non_backed_up_disk in group.non_backed_up_disks:
+                rc, stdout, stderr = execute_readonly_command(['zfs', 'list', non_backed_up_disk.destination])
                 if rc != 0: #Only ask if a disk should be recreated, if it doesn't already exist locally
-                    input_data = input ("Disk " + non_backuped_disk.unique_name + " was not backuped. Should it be recreated? (y/n): ").lower()
+                    input_data = input ("Disk " + non_backed_up_disk.unique_name + " was not backed up. Should it be recreated? (y/n): ").lower()
                     while not (input_data == 'y' or input_data == 'n'):
                         input_data = input ("Please answer y/n: ").lower()
                     if input_data == 'y':
-                        non_backuped_disk.recreate = True
+                        non_backed_up_disk.recreate = True
                 else:
-                    non_backuped_disk.skip = True
+                    non_backed_up_disk.skip = True
 
     print ("\n\nPlease check restore configuration:")
     for group in disk_groups:
@@ -264,22 +266,22 @@ def gather_restore_data(args):
             print ("ID: " + group.id + " skipped!")
             continue
         print ("ID: " + group.id + ":")
-        for backuped_disk in group.backuped_disks:
-            if backuped_disk.restore:
-                print ("RESTORE: " +  backuped_disk.unique_name + " from " + backuped_disk.last_snapshot + " to " + backuped_disk.destination + ": ")
-            elif backuped_disk.rollback:
-                print ("ROLLBACK: " + backuped_disk.unique_name + " to " + backuped_disk.destination + '@' + backuped_disk.last_snapshot.split('@')[1])
-            elif backuped_disk.keep:
-                print ("KEEP DATA: " + backuped_disk.unique_name)
-            elif backuped_disk.skip:
-                print ("SKIP: " + backuped_disk.unique_name)
+        for backed_up_disk in group.backed_up_disks:
+            if backed_up_disk.restore:
+                print ("RESTORE: " +  backed_up_disk.unique_name + " from " + backed_up_disk.last_snapshot + " to " + backed_up_disk.destination + ": ")
+            elif backed_up_disk.rollback:
+                print ("ROLLBACK: " + backed_up_disk.unique_name + " to " + backed_up_disk.destination + '@' + backed_up_disk.last_snapshot.split('@')[1])
+            elif backed_up_disk.keep:
+                print ("KEEP DATA: " + backed_up_disk.unique_name)
+            elif backed_up_disk.skip:
+                print ("SKIP: " + backed_up_disk.unique_name)
             else: #Doesn't exist locally, and should not be restored either, and is also not skipped because it isn't defined in the config
-                print (pzm_common.bcolors.WARNING + "WARNING: Disk " + backuped_disk.unique_name + " does not exist locally and was set to don't restore. The " + ("CT" if group.type == "lxc" else "VM") + " will be restored but the config will most likely be broken!" + pzm_common.bcolors.ENDC)
-        for non_backuped_disk in group.non_backuped_disks:
-            if non_backuped_disk.recreate:
-                print ("RECREATE: " + non_backuped_disk.unique_name + " to " + non_backuped_disk.destination)
-            elif not non_backuped_disk.skip:
-                print ("DON'T RECREATE: " + non_backuped_disk.unique_name)
+                print (pzm_common.bcolors.WARNING + "WARNING: Disk " + backed_up_disk.unique_name + " does not exist locally and was set to don't restore. The " + ("CT" if group.type == "lxc" else "VM") + " will be restored but the config will most likely be broken!" + pzm_common.bcolors.ENDC)
+        for non_backed_up_disk in group.non_backed_up_disks:
+            if non_backed_up_disk.recreate:
+                print ("RECREATE: " + non_backed_up_disk.unique_name + " to " + non_backed_up_disk.destination)
+            elif not non_backed_up_disk.skip:
+                print ("DON'T RECREATE: " + non_backed_up_disk.unique_name)
 
     input_data = input ("\nIs the information correct? (y):".lower())
     if input_data == 'y':
@@ -353,7 +355,7 @@ def restore(args, disk_groups):
                 continue
         no_restore_count = 0
 
-        for disk in group.backuped_disks:
+        for disk in group.backed_up_disks:
             if disk.restore:
                 print ("VM/CT ID " + group.id + " - restoring " + disk.destination)
                 rc, stdout, stderr = execute_readonly_command(['zfs', 'list', disk.destination])
@@ -417,20 +419,20 @@ def restore(args, disk_groups):
         elif group.type == "qemu":
             execute_command(['qm', 'unlock', group.id])
 
-        ###### Recreate disk if not backuped #####
-        for non_backuped_disk in group.non_backuped_disks:
-            if non_backuped_disk.recreate:
-                print ("VM/CT ID " + group.id + " - Recreating " + non_backuped_disk.unique_name)
+        ###### Recreate disk if it was ot backed up and set to recreate #####
+        for non_backed_up_disk in group.non_backed_up_disks:
+            if non_backed_up_disk.recreate:
+                print ("VM/CT ID " + group.id + " - Recreating " + non_backed_up_disk.unique_name)
                 #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
                 #options: "mp=/test,backup=1,size=8G" as list
-                options = non_backuped_disk.config_line.split(',',1)[1].split(',')
+                options = non_backed_up_disk.config_line.split(',',1)[1].split(',')
                 #hardware_id: mp1, scsi1, sata1 etc
-                hardware_id = non_backuped_disk.config_line.split(':', 1)[0]
+                hardware_id = non_backed_up_disk.config_line.split(':', 1)[0]
                 #from "size=8G" to "8"
                 size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
                 #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
 
-                storage_pool = non_backuped_disk.unique_name.split(':')[0]
+                storage_pool = non_backed_up_disk.unique_name.split(':')[0]
                 command = ""
                 if group.type == "lxc": command = "pct"
                 if group.type == "qemu": command = "qm"
@@ -448,8 +450,8 @@ def restore(args, disk_groups):
 
 
         ###### Remove references to non existing disk snapshots in config #####
-        print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this can take a while.")
-        cleanup_disks = group.backuped_disks + group.non_backuped_disks
+        print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this may take a while.")
+        cleanup_disks = group.backed_up_disks + group.non_backed_up_disks
         snaps_in_config = ""
         config = []
         if group.type == "lxc":
@@ -478,6 +480,7 @@ def restore(args, disk_groups):
 
         config_new = config.copy() #Copy to have to have the reference
         for disk in cleanup_disks:
+            print ("VM/CT ID " + group.id + " - Checking " + disk.unique_name)
             rc, stdout, stderr = execute_readonly_command(['zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', disk.destination])
             snapshots_on_disk = stdout.split('\n')
             for x in set(snapshots_on_disk).intersection(pzm_common.considered_empty):
@@ -497,7 +500,7 @@ def restore(args, disk_groups):
                     rc, stdout, stderr = execute_readonly_command([command, 'config', group.id, '--snapshot', snapname_in_config])
                     if disk.unique_name in stdout:
                         if not pzm_common.test:
-                            print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                            if pzm_common.debug: print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
                             #Delete this snapshot from the config
                             #Read all lines from config, search for the snapshot name, delete the whole line where disk.unique_name is found at the next occourance
                             found_snapshot = False
@@ -513,21 +516,21 @@ def restore(args, disk_groups):
                                     config_tmp.append(line)
                             config_new = config_tmp
                         else:
-                            print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                            if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
                     else:
-                        print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " is OK!")
-        if len(config) != len(config_new):
+                        if pzm_common.debug: print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " is OK!")
+
+        if len(config) != len(config_new): #Config must have changed, if string list isn't of the same length anymore
+            print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
             if not pzm_common.test:
-                if pzm_common.debug:
-                    print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
+                if pzm_common.debug: print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
                 if group.type == "lxc":
                     with open('/etc/pve/lxc/' + group.id + '.conf', 'w') as config_file:
                         config_file.writelines(config_new)
             else:
-                if pzm_common.debug:
-                     print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
-        if pzm_common.debug:
-            print ("VM/CT ID " + group.id + " - Snapshots are correct, nothing to cleanup in " + group.id)
+                if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
+        else:
+            print ("VM/CT ID " + group.id + " - Snapshots of config all exist on disk, nothing to cleanup")
 
         #Unlock before next group
         if group.type == "lxc":
