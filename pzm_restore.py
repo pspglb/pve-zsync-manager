@@ -391,13 +391,13 @@ def restore(args, disk_groups):
                             print (stdout)
                             print (stderr)
                             continue
-                    ### If the parent zfs-dataset of the disk is also encrypted, inherit the key from it
-                    if parent_encrypted:
-                        rc, stdout, stderr, pid = execute_command(['zfs', 'change-key', '-i', disk.destination])
-                        if rc != 0:
-                            print (stdout)
-                            print (stderr)
-                            continue
+                        ### If the parent zfs-dataset of the disk is also encrypted, inherit the key from it
+                        if parent_encrypted:
+                            rc, stdout, stderr, pid = execute_command(['zfs', 'change-key', '-i', disk.destination])
+                            if rc != 0:
+                                print (stdout)
+                                print (stderr)
+                                continue
 
                 rc, stdout, stderr, pid = execute_command(['zfs', 'mount', disk.destination])
                 if rc != 0:
