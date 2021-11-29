@@ -315,7 +315,7 @@ def zfs_is_encrypted(dataset):
 
 #Main method for the restore function. Will restore a backup made with pve-zsync-manager or pve-zsync according to the given input in gather_restore_data
 def restore(args, disk_groups):
-    lock(args.hostname)
+    if not pzm_common.test: lock(args.hostname)
     for group in disk_groups:
         if group.skip:
             print ("VM/CT ID " + group.id + " skipped...")
@@ -448,11 +448,17 @@ def restore(args, disk_groups):
         cleanup_disks = group.backed_up_disks + group.non_backed_up_disks
 
         config = []
+        old_config = []
 
         snaps_in_config = execute_readonly_command([vm_ct_interaction_command, 'listsnapshot', group.id])[1].split('\n')
 
         with open(config_file_path, 'r') as config_file:
             config = config_file.readlines()
+
+        if (os.path.exists(config_file_path + ".backup")):
+            #Needed to delete snapshots from disk which are no more referenced
+            with open(config_file_path + ".backup", 'r') as old_config_file:
+                old_config = old_config_file.readlines()
 
         for x in set(snaps_in_config).intersection(pzm_common.considered_empty):
             snaps_in_config.remove(x)
@@ -511,6 +517,22 @@ def restore(args, disk_groups):
             else:
                 print ("VM/CT ID " + group.id + " - Deleted " + disk.unique_name + " from " + str(deleted_lines) + " snapshot entries, as the snapshots can't be found on disk")
 
+            ##### If backup config exists, check it and delete all snapshots from disk which are not present in the restored config
+            if len(old_config) > 0:
+                matches_old_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(old_config), re.MULTILINE) #Find pattern: [autoWeekly_2021-11-28_00-25-02]
+                matches_old_config = [x.replace('[', '').replace(']','') for x in matches_old_config] #remove square braces
+                
+                matches_restored_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(config_new), re.MULTILINE)
+                matches_restored_config = [x.replace('[', '').replace(']','') for x in matches_restored_config]
+                
+                
+                #Remove snapshots which are present in both config files from old config matches
+                #Old config matches should then only contain snapshot which are no more present on dis
+                for x in set(matches_old_config).intersection(matches_restored_config): 
+                    matches_old_config.remove(x)
+                    
+                    
+
 
         if len(config) != len(config_new): #Config must have changed, if string list isn't of the same length anymore
             #print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
@@ -522,10 +544,6 @@ def restore(args, disk_groups):
                 if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
         #else:
         #    print ("VM/CT ID " + group.id + " - Snapshots of config all exist on disk, nothing to cleanup")
-
-        ##### Read backup config if one exists, and delete all snapshots from disk which are not present in the restored config
-
-
 
         #Unlock before next group
         execute_command([vm_ct_interaction_command, 'unlock', group.id])
