@@ -391,7 +391,7 @@ def restore(args, disk_groups):
         #Recreate disk if not backuped
         for non_backuped_disk in group.non_backuped_disks:
             if non_backuped_disk.recreate:
-                print ("Recreating " + non_backuped_disk.unique_name)
+                print ("VM/CT ID " + group.id + " - Recreating " + non_backuped_disk.unique_name)
                 if group.type == "lxc":
                     config = []
                     config_new = []
@@ -403,11 +403,11 @@ def restore(args, disk_groups):
                             config_new.append(line)
 
                     if not pzm_common.test:
-                        print("Removing " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+                        print("VM/CT ID " + group.id + " - Removing " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
                         with open('/etc/pve/lxc/' + group.id + '.conf', 'w') as config_file:
                             config_file.writelines(config_new)
                     else:
-                        print("Would remove " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+                        print("VM/CT ID " + group.id + " - Would remove " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
 
                     #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
                     #options: "mp=/test,backup=1,size=8G" as list
@@ -429,44 +429,90 @@ def restore(args, disk_groups):
         elif group.type == "qemu":
             execute_command(['qm', 'unlock', group.id])
 
-        ## Force Delete PVE Snapshots which are not on all disks
+        ## Remove references to non existing disk snapshots in config
         if no_restore_count > 0:
+            print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this can take a while.")
             cleanup_disks = [ element for element in group.backuped_disks if not ( element.restore )]
+            snaps_in_config = ""
+            config = []
             if group.type == "lxc":
                 snaps_in_config = execute_readonly_command(['pct', 'listsnapshot', group.id])[1]
+
+                with open('/etc/pve/lxc/' + group.id + '.conf', 'r') as config_file:
+                    config = config_file.readlines()
             elif group.type == "qemu":
                 snaps_in_config = execute_readonly_command(['qm', 'listsnapshot', group.id])[1]
+
+                with open('/etc/pve/qemu-server/' + group.id + '.conf', 'r') as config_file:
+                    config = config_file.readlines()
+
             snaps_in_config = snaps_in_config.split('\n')
+
+
 
             for x in set(snaps_in_config).intersection(pzm_common.considered_empty):
                 snaps_in_config.remove(x)
 
             snapnames_in_config = []
             for snap_in_config in snaps_in_config:
+                #"             -> autoMonthly_2021-09-01_00-40-02 2021-09-01 00:40:02   "
                 snapnames_in_config.append(snap_in_config.lstrip().split(' ')[1])
-                #print ("Snapname: " + snap_in_config.lstrip().split(' ')[1])
             if "current" in snapnames_in_config:
                 snapnames_in_config.pop(snapnames_in_config.index("current"))
 
-            all_snaps_on_disks = []
+
+
+            config_new = config.copy() #Copy to have to have the reference
             for disk in cleanup_disks:
                 rc, stdout, stderr = execute_readonly_command(['zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', disk.destination])
                 snapshots_on_disk = stdout.split('\n')
                 for x in set(snapshots_on_disk).intersection(pzm_common.considered_empty):
                     snapshots_on_disk.remove(x)
-                for snapshot_on_disk in snapshots_on_disk:
-                    if not snapshot_on_disk.split('@')[1] in all_snaps_on_disks:
-                        #print ("Snap on Disk: " + snapshot_on_disk.split('@')[1])
-                        all_snaps_on_disks.append(snapshot_on_disk.split('@')[1])
 
-            for snapname_in_config in snapnames_in_config:
-                if not snapname_in_config in all_snaps_on_disks:
+                #We only want the snapshot name
+                snapshots_on_disk = [element.split('@')[1] for element in snapshots_on_disk]
+
+                for snapname_in_config in snapnames_in_config:
+                    if snapname_in_config in snapshots_on_disk: #If a snapshot which is in the config is also on disk
+                        continue #Then it's okay
+                    else: #If it's in the config, but not on disk
+                        if group.type == "lxc":
+                            rc, stdout, stderr = execute_readonly_command(['pct', 'config', group.id, '--snapshot', snapname_in_config])
+                            if disk.unique_name in stdout:
+                                if not pzm_common.test:
+                                    print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                                    #Delete this snapshot from the config
+                                    #Read all lines from config, search for the snapshot name, delete the whole line where disk.unique_name is found at the next occourance
+                                    found_snapshot = False
+                                    config_tmp = []
+                                    for line in config_new:
+                                        if snapname_in_config in line and not "parent" in line: #Found snapshot header. Can only occour once in config file
+                                            found_snapshot = True
+                                        if found_snapshot and disk.unique_name in line:
+                                            #the snapshot was found previously and the line matches, skip writing that line, and set found_snapshot to False again
+                                            #so it doesn't skip further occourance
+                                            found_snapshot = False
+                                        else:
+                                            config_tmp.append(line)
+                                    config_new = config_tmp
+                                else:
+                                    print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
+                            else:
+                                print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapname_in_config + " OK!")
+
+            if len(config) != len(config_new):
+                if not pzm_common.test:
+                    if pzm_common.debug:
+                        print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
                     if group.type == "lxc":
-                        print ("Deleting Snapshot " + snapname_in_config + " because it's not present on all disks")
-                        execute_command(['pct', 'delsnapshot', group.id, snapname_in_config, '--force'])
-                    elif group.type == "qemu":
-                        print ("Deleting Snapshot " + snapname_in_config + " because it's not present on all disks")
-                        execute_command(['qm', 'delsnapshot', group.id, snapname_in_config, '--force'])
+                        with open('/etc/pve/lxc/' + group.id + '.conf', 'w') as config_file:
+                            config_file.writelines(config_new)
+                else:
+                    if pzm_common.debug:
+                        print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
+            if pzm_common.debug:
+                print ("VM/CT ID " + group.id + " - Snapshots are correct, nothing to cleanup in " + group.id)
+
 
         print ("VM/CT ID " + group.id + " finished!")
     unlock(args.hostname)
