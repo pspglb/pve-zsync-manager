@@ -268,7 +268,7 @@ def gather_restore_data(args):
             if backuped_disk.restore:
                 print ("RESTORE: " +  backuped_disk.unique_name + " from " + backuped_disk.last_snapshot + " to " + backuped_disk.destination + ": ")
             elif backuped_disk.rollback:
-                print ("ROLLBACK: " + backuped_disk.unique_name + " to " + backuped_disk.destination + backuped_disk.last_snapshot.split('@')[1])
+                print ("ROLLBACK: " + backuped_disk.unique_name + " to " + backuped_disk.destination + '@' + backuped_disk.last_snapshot.split('@')[1])
             elif backuped_disk.keep:
                 print ("KEEP DATA: " + backuped_disk.unique_name)
             elif backuped_disk.skip:
@@ -398,7 +398,7 @@ def restore(args, disk_groups):
             elif disk.rollback:
                 no_restore_count = no_restore_count + 1
                 print ("VM/CT ID " + group.id + " - rolling back " + disk.destination + " to " + disk.last_snapshot.split('@')[1])
-                rc, stdout, stderr, pid = execute_command(['zfs', 'rollback', '-r', disk.destination + disk.last_snapshot.split('@')[1]])
+                rc, stdout, stderr, pid = execute_command(['zfs', 'rollback', '-r', disk.destination + '@' + disk.last_snapshot.split('@')[1]])
                 if rc != 0:
                     print (stdout)
                     print (stderr)
