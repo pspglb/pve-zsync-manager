@@ -197,7 +197,7 @@ def gather_restore_data(args):
     for zfs_disk in zfs_disks:
         if args.zfs_source_pool + '/' in zfs_disk:
             disk = Backuped_Disk(args.hostname, zfs_disk, args.backupname, args.config_path)
-            if not disk.skip:
+            if not disk.skip: #If it was skipped during detection, we don't need to bother anymore
                 zfs_found_disk_objects.append(disk)
 
     disk_groups = []
@@ -221,15 +221,15 @@ def gather_restore_data(args):
             if input_data == 'y':
                 disk.restore = True
 
-
+        print ("")
         no_restore_disks = [element for element in group.backuped_disks if (element.restore == False)]
         restore_disks = [element for element in group.backuped_disks if (element.restore == True)]
         if len(group.backuped_disks) > len(restore_disks):
             if len(restore_disks) > 0: #Only ask for other disks in a CT, if at minimum one disk has to be restored
                 for no_restore_disk in no_restore_disks:
-                    #Check if it exists locally, if not, warn user about it later that the The VM/CT will be restored in a broken state
+                    #Check if it exists locally or if it's in the config, if not, warn user about it later that the The VM/CT will be restored in a broken state
                     rc, stdout, stderr = execute_readonly_command(['zfs', 'list', no_restore_disk.destination])
-                    if rc == 0: #It it was found, ask for it's fate, else, warn later
+                    if rc == 0 : #It it was found, ask for it's fate
                         input_data = input ("Fate of " + no_restore_disk.unique_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ").lower()
                         while not (input_data == 'rollback' or input_data == 'keep'):
                             input_data = input ("Please answer rollback/keep: ").lower()
@@ -237,6 +237,10 @@ def gather_restore_data(args):
                             no_restore_disk.rollback = True
                         elif input_data == 'keep':
                             no_restore_disk.keep = True
+                    else: #If it was not found, check if it actually is defined in the config file
+                        rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + args.hostname, 'cat', args.config_path + '/' + group.get_last_config()])
+                        if no_restore_disk.unique_name not in stdout: #Disk is not in config file, we can safely skip this disk
+                            no_restore_disk.skip = True
             else:
                 group.skip = True
         if len(restore_disks) == 0:
@@ -262,8 +266,10 @@ def gather_restore_data(args):
             elif backuped_disk.rollback:
                 print ("ROLLBACK: " + backuped_disk.unique_name + " to " + backuped_disk.destination + backuped_disk.last_snapshot.split('@')[1])
             elif backuped_disk.keep:
-                print ("KEEP DATA: " + backuped_disk.destination)
-            else: #Doesn't exist locally, and should not be restored either
+                print ("KEEP DATA: " + backuped_disk.unique_name)
+            elif backuped_disk.skip:
+                print ("SKIP: " + backuped_disk.unique_name)
+            else: #Doesn't exist locally, and should not be restored either, and is also not skipped because it isn't defined in the config
                 print (pzm_common.bcolors.WARNING + "WARNING: Disk " + backuped_disk.unique_name + " does not exist locally and was set to don't restore. The " + ("CT" if group.type == "lxc" else "VM") + " will be restored but the config will most likely be broken!" + pzm_common.bcolors.ENDC)
         for non_backuped_disk in group.non_backuped_disks:
             if non_backuped_disk.recreate:
@@ -458,7 +464,10 @@ def restore(args, disk_groups):
         ## Remove references to non existing disk snapshots in config
         if no_restore_count > 0:
             print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this can take a while.")
-            cleanup_disks = [ element for element in group.backuped_disks if not ( element.restore )]
+            cleanup_disks_backuped = [ element for element in group.backuped_disks if not ( element.restore )]
+            cleanup_disks_recreated = [ element for element in group.non_backuped_disks if element.recreate ]
+            cleanup_disks = cleanup_disks_backuped + cleanup_disks_recreated
+
             snaps_in_config = ""
             config = []
             if group.type == "lxc":
@@ -466,6 +475,7 @@ def restore(args, disk_groups):
 
                 with open('/etc/pve/lxc/' + group.id + '.conf', 'r') as config_file:
                     config = config_file.readlines()
+
             elif group.type == "qemu":
                 snaps_in_config = execute_readonly_command(['qm', 'listsnapshot', group.id])[1]
 
@@ -473,8 +483,6 @@ def restore(args, disk_groups):
                     config = config_file.readlines()
 
             snaps_in_config = snaps_in_config.split('\n')
-
-
 
             for x in set(snaps_in_config).intersection(pzm_common.considered_empty):
                 snaps_in_config.remove(x)
