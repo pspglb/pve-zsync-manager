@@ -63,6 +63,7 @@ class Disk:
 
     def __init__(self):
         self.unique_name = ""
+        self.skip = False
 
 
 class Backuped_Disk(Disk):
@@ -109,7 +110,6 @@ class Backuped_Disk(Disk):
         self.restore = False
         self.rollback = False
         self.keep = False
-        self.skip = False
         self.full_name = full_name
         self.name = full_name.split('/')[-1]
         self.id = self.parse_id()
@@ -248,11 +248,15 @@ def gather_restore_data(args):
 
         if not group.skip:
             for non_backuped_disk in group.non_backuped_disks:
-                input_data = input ("Disk " + non_backuped_disk.unique_name + " was not backuped. Should it be recreated? (y/n): ").lower()
-                while not (input_data == 'y' or input_data == 'n'):
-                    input_data = input ("Please answer y/n: ").lower()
-                if input_data == 'y':
-                    non_backuped_disk.recreate = True
+                rc, stdout, stderr = execute_readonly_command(['zfs', 'list', non_backuped_disk.destination])
+                if rc != 0: #Only ask if a disk should be recreated, if it doesn't already exist locally
+                    input_data = input ("Disk " + non_backuped_disk.unique_name + " was not backuped. Should it be recreated? (y/n): ").lower()
+                    while not (input_data == 'y' or input_data == 'n'):
+                        input_data = input ("Please answer y/n: ").lower()
+                    if input_data == 'y':
+                        non_backuped_disk.recreate = True
+                else:
+                    non_backuped_disk.skip = True
 
     print ("\n\nPlease check restore configuration:")
     for group in disk_groups:
@@ -274,7 +278,7 @@ def gather_restore_data(args):
         for non_backuped_disk in group.non_backuped_disks:
             if non_backuped_disk.recreate:
                 print ("RECREATE: " + non_backuped_disk.unique_name + " to " + non_backuped_disk.destination)
-            else:
+            elif not non_backuped_disk.skip:
                 print ("DON'T RECREATE: " + non_backuped_disk.unique_name)
 
     input_data = input ("\nIs the information correct? (y):".lower())
