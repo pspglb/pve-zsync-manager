@@ -122,10 +122,11 @@ class Backuped_Disk(Disk):
         self.destination = self.get_destination()
 
 class Non_Backuped_Disk(Disk):
-    def __init__(self, config_file, unique_name, type):
+    def __init__(self, config_file, config_line, type):
         super().__init__()
-        self.unique_name = unique_name
+        self.unique_name = get_unique_name_from_config_line(config_line)
         self.type = type
+        self.config_line = config_line
         self.destination = self.get_destination()
         self.recreate = False
 
@@ -150,15 +151,15 @@ class Disk_Group:
         stdout = stdout.split('\n')
         for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)
-        all_disks = [get_unique_name_from_config_line(element) for element in stdout if f"-{self.id}-disk-" in element]
+        all_disks = [element for element in stdout if f"-{self.id}-disk-" in element]
 
 
         #Only use disks, which were not found at the backup location
-        parsed_non_backuped_disks = [element for element in all_disks if len([backuped_disk for backuped_disk in self.backuped_disks if element in backuped_disk.unique_name]) == 0]
+        parsed_non_backuped_disk_config_lines = [element for element in all_disks if len([backuped_disk for backuped_disk in self.backuped_disks if get_unique_name_from_config_line(element) in backuped_disk.unique_name]) == 0]
 
 
-        for parsed_non_backuped_disk in parsed_non_backuped_disks:
-            self.non_backuped_disks.append(Non_Backuped_Disk(configs_path + '/' + self.last_config, parsed_non_backuped_disk, self.type))
+        for config_line in parsed_non_backuped_disk_config_lines:
+            self.non_backuped_disks.append(Non_Backuped_Disk(configs_path + '/' + self.last_config, config_line, self.type))
 
     def __eq__(self,other):
         if not isinstance(other, Disk_Group):
@@ -206,19 +207,24 @@ def gather_restore_data(args):
             while not (input_data == 'y' or input_data == 'n'):
                 input_data = input ("Please answer y/n: ").lower()
             if input_data == 'y':
-               disk.restore = True
+                disk.restore = True
+
+
         no_restore_disks = [element for element in group.backuped_disks if (element.restore == False)]
         restore_disks = [element for element in group.backuped_disks if (element.restore == True)]
         if len(group.backuped_disks) > len(restore_disks):
-            if len(restore_disks) > 0:
+            if len(restore_disks) > 0: #Only ask for other disks in a CT, if at minimum one disk has to be restored
                 for no_restore_disk in no_restore_disks:
-                    input_data = input ("Fate of " + no_restore_disk.unique_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ").lower()
-                    while not (input_data == 'rollback' or input_data == 'keep'):
-                        input_data = input ("Please answer rollback/keep: ").lower()
-                    if input_data == 'rollback':
-                        no_restore_disk.rollback = True
-                    elif input_data == 'keep':
-                        no_restore_disk.keep = True
+                    #Check if it exists locally, if not, warn user about it later that the The VM/CT will be restored in a broken state
+                    rc, stdout, stderr = execute_readonly_command(['zfs', 'list', no_restore_disk.destination])
+                    if rc == 0: #It it was found, ask for it's fate, else, warn later
+                        input_data = input ("Fate of " + no_restore_disk.unique_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ").lower()
+                        while not (input_data == 'rollback' or input_data == 'keep'):
+                            input_data = input ("Please answer rollback/keep: ").lower()
+                        if input_data == 'rollback':
+                            no_restore_disk.rollback = True
+                        elif input_data == 'keep':
+                            no_restore_disk.keep = True
             else:
                 group.skip = True
         if len(restore_disks) == 0:
@@ -245,6 +251,8 @@ def gather_restore_data(args):
                 print ("ROLLBACK: " + backuped_disk.unique_name + " to " + backuped_disk.destination + backuped_disk.last_snapshot.split('@')[1])
             elif backuped_disk.keep:
                 print ("KEEP DATA: " + backuped_disk.destination)
+            else: #Doesn't exist locally, and should not be restored either
+                print (pzm_common.bcolors.WARNING + "WARNING: Disk " + backuped_disk.unique_name + " does not exist locally and was set to don't restore. The " + ("CT" if group.type == "lxc" else "VM") + " will be restored but the config will most likely be broken!" + pzm_common.bcolors.ENDC)
         for non_backuped_disk in group.non_backuped_disks:
             if non_backuped_disk.recreate:
                 print ("RECREATE: " + non_backuped_disk.unique_name + " to " + non_backuped_disk.destination)
@@ -380,6 +388,42 @@ def restore(args, disk_groups):
                 destroy_newer_snapshots(args, disk.destination, disk.last_snapshot)
 
 
+        #Recreate disk if not backuped
+        for non_backuped_disk in group.non_backuped_disks:
+            if non_backuped_disk.recreate:
+                print ("Recreating " + non_backuped_disk.unique_name)
+                if group.type == "lxc":
+                    config = []
+                    config_new = []
+                    with open('/etc/pve/lxc/' + group.id + '.conf', 'r') as config_file:
+                        config = config_file.readlines()
+
+                    for line in config:
+                        if non_backuped_disk.unique_name not in line.replace(' ',''):
+                            config_new.append(line)
+
+                    if not pzm_common.test:
+                        print("Removing " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+                        with open('/etc/pve/lxc/' + group.id + '.conf', 'w') as config_file:
+                            config_file.writelines(config_new)
+                    else:
+                        print("Would remove " + non_backuped_disk.unique_name + " from config, deleting " + str(len(config)-len(config_new)) + " lines")
+
+                    #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
+                    #options: "mp=/test,backup=1,size=8G" as list
+                    options = non_backuped_disk.config_line.split(',',1)[1].split(',')
+                    mp_id = non_backuped_disk.config_line.split(':', 1)[0]
+                    #from "size=8G" to "8"
+                    size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
+                    #unique_name "vmsys:subvol-100-disk-1"
+                    storage_pool = non_backuped_disk.unique_name.split(':')[0]
+                    rc, stdout, stderr, pid = execute_command(['pct', 'set', group.id, f'--{mp_id}', f"{storage_pool}:{size},{','.join(options)}"])
+                    if rc != 0:
+                        print (stdout)
+                        print (stderr)
+                        continue
+
+
         if group.type == "lxc":
             execute_command(['pct', 'unlock', group.id])
         elif group.type == "qemu":
@@ -423,10 +467,6 @@ def restore(args, disk_groups):
                     elif group.type == "qemu":
                         print ("Deleting Snapshot " + snapname_in_config + " because it's not present on all disks")
                         execute_command(['qm', 'delsnapshot', group.id, snapname_in_config, '--force'])
-
-        for non_backuped_disk in group.non_backuped_disks:
-            if non_backuped_disk.recreate:
-                print ("Recreating " + disk.unique_name)
 
         print ("VM/CT ID " + group.id + " finished!")
     unlock(args.hostname)
