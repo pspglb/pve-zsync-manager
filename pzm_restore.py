@@ -322,42 +322,34 @@ def restore(args, disk_groups):
             continue
         print ("VM/CT ID " + group.id + " preparing...")
 
-        ###### Shutdown VM/CT, lock it so the config won't be altered by PVE, back up the old config if exists, and copy over the backup config
+        config_file_path = ""
+        vm_ct_interaction_command = ""
         if (group.type == "lxc"):
-            execute_command(['pct', 'shutdown', group.id])
-            execute_command(['pct', 'set', group.id, '--lock=backup'])
+            config_file_path = '/etc/pve/lxc/' + group.id + '.conf'
+            vm_ct_interaction_command = 'pct'
+        if (group.type == "qemu"):
+            config_file_path = '/etc/pve/qemu-server/' + group.id + '.conf'
+            vm_ct_interaction_command = 'qm'
 
-            rc, stdout, stderr, pid = execute_command(['mv', '/etc/pve/lxc/' + group.id + '.conf', '/etc/pve/lxc/' + group.id + '.conf.backup'])
-            #if rc != 0:
-            #    print (stdout)
-            #    print (stderr)
-            #    continue
 
-            rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.get_last_config(), '/etc/pve/lxc/' + group.id + '.conf'])
-            if rc != 0:
-                print (stdout)
-                print (stderr)
-                execute_command(['mv', '/etc/pve/lxc/' + group.id + '.conf.backup', '/etc/pve/lxc/' + group.id + '.conf'])
-                continue
+        ###### Shutdown VM/CT, lock it so the config won't be altered by PVE, back up the old config if exists, and copy over the backup config
+        execute_command([vm_ct_interaction_command, 'shutdown', group.id])
+        execute_command([vm_ct_interaction_command, 'set', group.id, '--lock=backup'])
 
-        elif (group.type == "qemu"):
-            execute_command(['qm', 'shutdown', group.id])
-            execute_command(['qm', 'set', group.id, '--lock=backup'])
+        rc, stdout, stderr, pid = execute_command(['mv', config_file_path, config_file_path + '.backup'])
+        #if rc != 0:
+        #    print (stdout)
+        #    print (stderr)
+        #    continue
 
-            rc, stdout, stderr, pid = execute_command(['mv', '/etc/pve/qemu-server/' + group.id + '.conf', '/etc/pve/qemu-server/' + group.id + '.conf.backup'])
-            #if rc != 0:
-            #    print (stdout)
-            #    print (stderr)
-            #    continue
+        rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.get_last_config(), config_file_path])
+        if rc != 0:
+            print (stdout)
+            print (stderr)
+            execute_command(['mv', config_file_path + '.backup', config_file_path])
+            continue
 
-            rc, stdout, stderr, pid = execute_command(['scp', '-B', 'root@' + args.hostname + ':' + args.config_path + '/' + group.get_last_config(), '/etc/pve/qemu-server/' + group.id + '.conf'])
-            if rc != 0:
-                print (stdout)
-                print (stderr)
-                execute_command(['mv', '/etc/pve/qemu-server/' + group.id + '.conf.backup', '/etc/pve/qemu-server/' + group.id + '.conf'])
-                continue
         no_restore_count = 0
-
 
         ###### Start the restore progress
         for disk in group.backed_up_disks:
@@ -425,10 +417,7 @@ def restore(args, disk_groups):
 
 
         ###### Unlock for recreating #####
-        if group.type == "lxc":
-            execute_command(['pct', 'unlock', group.id])
-        elif group.type == "qemu":
-            execute_command(['qm', 'unlock', group.id])
+        execute_command([vm_ct_interaction_command, 'unlock', group.id])
 
         ###### Recreate disk if it was ot backed up and set to recreate #####
         for non_backed_up_disk in group.non_backed_up_disks:
@@ -444,40 +433,26 @@ def restore(args, disk_groups):
                 #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
 
                 storage_pool = non_backed_up_disk.unique_name.split(':')[0]
-                command = ""
-                if group.type == "lxc": command = "pct"
-                if group.type == "qemu": command = "qm"
-                rc, stdout, stderr, pid = execute_command([command, 'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size},{','.join(options)}"])
+                rc, stdout, stderr, pid = execute_command([vm_ct_interaction_command, 'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size},{','.join(options)}"])
                 if rc != 0:
                     print (stdout)
                     print (stderr)
                     continue
 
         ###### Lock again for snapshot cleanup #####
-        if group.type == "lxc":
-            execute_command(['pct', 'set', group.id, '--lock=backup'])
-        elif group.type == "qemu":
-            execute_command(['qm', 'set', group.id, '--lock=backup'])
+        execute_command([vm_ct_interaction_command, 'set', group.id, '--lock=backup'])
 
 
         ###### Remove references to non existing disk snapshots in config #####
         print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this may take a while.")
         cleanup_disks = group.backed_up_disks + group.non_backed_up_disks
-        snaps_in_config = ""
+
         config = []
-        if group.type == "lxc":
-            snaps_in_config = execute_readonly_command(['pct', 'listsnapshot', group.id])[1]
 
-            with open('/etc/pve/lxc/' + group.id + '.conf', 'r') as config_file:
-                config = config_file.readlines()
+        snaps_in_config = execute_readonly_command([vm_ct_interaction_command, 'listsnapshot', group.id])[1].split('\n')
 
-        elif group.type == "qemu":
-            snaps_in_config = execute_readonly_command(['qm', 'listsnapshot', group.id])[1]
-
-            with open('/etc/pve/qemu-server/' + group.id + '.conf', 'r') as config_file:
-                config = config_file.readlines()
-
-        snaps_in_config = snaps_in_config.split('\n')
+        with open(config_file_path, 'r') as config_file:
+            config = config_file.readlines()
 
         for x in set(snaps_in_config).intersection(pzm_common.considered_empty):
             snaps_in_config.remove(x)
@@ -505,11 +480,8 @@ def restore(args, disk_groups):
                 if snapname_in_config in snapshots_on_disk: #If a snapshot which is in the config is also on disk
                     continue #Then it's okay
                 else: #If it's in the config, but not on disk
-                    command = ""
-                    if group.type == "lxc": command = "pct"
-                    if group.type == "qemu": command = "qm"
 
-                    rc, stdout, stderr = execute_readonly_command([command, 'config', group.id, '--snapshot', snapname_in_config])
+                    rc, stdout, stderr = execute_readonly_command([vm_ct_interaction_command, 'config', group.id, '--snapshot', snapname_in_config])
                     if disk.unique_name in stdout:
                         if not pzm_common.test:
                             if pzm_common.debug: print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapname_in_config)
@@ -544,19 +516,19 @@ def restore(args, disk_groups):
             #print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
             if not pzm_common.test:
                 if pzm_common.debug: print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
-                if group.type == "lxc":
-                    with open('/etc/pve/lxc/' + group.id + '.conf', 'w') as config_file:
-                        config_file.writelines(config_new)
+                with open(config_file_path, 'w') as config_file:
+                    config_file.writelines(config_new)
             else:
                 if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
         #else:
         #    print ("VM/CT ID " + group.id + " - Snapshots of config all exist on disk, nothing to cleanup")
 
+        ##### Read backup config if one exists, and delete all snapshots from disk which are not present in the restored config
+
+
+
         #Unlock before next group
-        if group.type == "lxc":
-            execute_command(['pct', 'unlock', group.id])
-        elif group.type == "qemu":
-            execute_command(['qm', 'unlock', group.id])
+        execute_command([vm_ct_interaction_command, 'unlock', group.id])
 
         print ("VM/CT ID " + group.id + " finished!")
     unlock(args.hostname)
