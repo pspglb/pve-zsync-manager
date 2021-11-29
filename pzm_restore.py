@@ -144,7 +144,8 @@ class Disk_Group:
     def get_last_config(self):
         configs = [disk.last_config for disk in self.backuped_disks]
         if configs is not None and len(configs) > 0:
-            configs.sort(reverse=True)
+            #100.conf.qemu.rep_backup-name_2021-11-27_00:13:50
+            configs.sort(key = lambda x: '_'.join([x.split('_')[-2], x.split('_')[-1]]),reverse=True)
             return configs[0]
         else:
             return None
