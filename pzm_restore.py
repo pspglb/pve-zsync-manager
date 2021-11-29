@@ -320,6 +320,8 @@ def restore(args, disk_groups):
             print ("VM/CT ID " + group.id + " skipped...")
             continue
         print ("VM/CT ID " + group.id + " preparing...")
+
+        ###### Shutdown VM/CT, lock it so the config won't be altered by PVE, back up the old config if exists, and copy over the backup config
         if (group.type == "lxc"):
             execute_command(['pct', 'shutdown', group.id])
             execute_command(['pct', 'set', group.id, '--lock=backup'])
@@ -355,7 +357,10 @@ def restore(args, disk_groups):
                 continue
         no_restore_count = 0
 
+
+        ###### Start the restore progress
         for disk in group.backed_up_disks:
+            ### If the disk is set to be restored as a whole from backup
             if disk.restore:
                 print ("VM/CT ID " + group.id + " - restoring " + disk.destination)
                 rc, stdout, stderr = execute_readonly_command(['zfs', 'list', disk.destination])
@@ -371,6 +376,7 @@ def restore(args, disk_groups):
                     print (stderr)
                     continue
 
+                ### If a keyfile was specified, and the disk is/was encrypted load the key in
                 if args.keyfile is not None:
                     dataset_encrypted = zfs_is_encrypted(disk.destination)
                     parent_encrypted = zfs_is_encrypted(disk.destination.rsplit('/',1)[0])
@@ -385,6 +391,7 @@ def restore(args, disk_groups):
                             print (stdout)
                             print (stderr)
                             continue
+                    ### If the parent zfs-dataset of the disk is also encrypted, inherit the key from it
                     if parent_encrypted:
                         rc, stdout, stderr, pid = execute_command(['zfs', 'change-key', '-i', disk.destination])
                         if rc != 0:
@@ -397,6 +404,8 @@ def restore(args, disk_groups):
                     print (stdout)
                     print (stderr)
                     continue
+
+            ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
             elif disk.rollback:
                 no_restore_count = no_restore_count + 1
                 print ("VM/CT ID " + group.id + " - rolling back " + disk.destination + " to " + disk.last_snapshot.split('@')[1])
@@ -406,6 +415,7 @@ def restore(args, disk_groups):
                     print (stderr)
                     continue
 
+            ### Disk which are set to keep, will not alter any current data, but delete any newer snapshots than the timestamp of the restore disk
             elif disk.keep:
                 no_restore_count = no_restore_count + 1
                 print ("VM/CT ID " + group.id + " - destroying newer snapshots than " + disk.last_snapshot.split('@')[1] + " on " + disk.destination)
