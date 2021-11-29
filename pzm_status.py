@@ -7,18 +7,6 @@ from prettytable import PrettyTable
 from json.decoder import JSONDecodeError
 
 
-#Colors for fancy table output
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
 #Read status from json status file. Either in fancy, human friendly manner (plain=False), or for automated reports, in plain text
 def read_from_json(plain):
     if not os.path.exists(pzm_common.statusJsonFile):
@@ -67,20 +55,20 @@ def read_from_json(plain):
 
             else:
                 for i in range(len(headers)):
-                    headers[i] = bcolors.HEADER + headers[i] + bcolors.ENDC
+                    headers[i] = pzm_common.bcolors.HEADER + headers[i] + pzm_common.bcolors.ENDC
 
                 table = PrettyTable(headers)
 
                 for name, data in sorted.items():
                     for name, data in data.items():
-                        table.add_row([(bcolors.BOLD if data['id'] == "all" else "") + data['id'] + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + data['backupname'] + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + data['starttime'] + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + data['endtime'] + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + data['duration'] + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + data['size'] if data.get('size') is not None else "-" + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + (bcolors.FAIL if data['status'] == "error" else bcolors.OKGREEN) + data['status'] + bcolors.ENDC + (bcolors.ENDC if data['id'] == "all" else ""),
-                                       (bcolors.BOLD if data['id'] == "all" else "") + data['info'] + (bcolors.ENDC if data['id'] == "all" else "")
+                        table.add_row([(pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['id'] + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['backupname'] + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['starttime'] + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['endtime'] + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['duration'] + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['size'] if data.get('size') is not None else "-" + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + (pzm_common.bcolors.FAIL if data['status'] == "error" else pzm_common.bcolors.OKGREEN) + data['status'] + pzm_common.bcolors.ENDC + (pzm_common.bcolors.ENDC if data['id'] == "all" else ""),
+                                       (pzm_common.bcolors.BOLD if data['id'] == "all" else "") + data['info'] + (pzm_common.bcolors.ENDC if data['id'] == "all" else "")
                                      ])
                     table.add_row(empty_line)
                 row_count = 0
