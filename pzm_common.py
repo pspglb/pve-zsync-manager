@@ -5,29 +5,14 @@ import datetime
 import sys
 
 def initialize():
-    global initialized
     global debug
     global test
     global statusJsonFile
     global considered_empty
-
-
-    try:
-        initialized
-    except NameError:
-        debug = False
-        test = False
-
-
-        statusJsonFile = "/var/lib/pve-zsync/manager_sync_state"
-
-
-        considered_empty = ['\n', '', " "]
-        initialized = True
-    else:
-        pass
- 	#Initialized was defined, skip resetting values
-
+    debug = False
+    test = False
+    statusJsonFile = "/var/lib/pve-zsync/manager_sync_state"
+    considered_empty = ['\n', '', " "]
 
 #Log to stdout
 def log(data):
