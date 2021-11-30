@@ -291,7 +291,7 @@ def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_comman
         if snapshot_in_config.keep_snapshot: #Only show this line, if the snapshot will be kept
             deleted_lines = current_config_len - len(config_new)
             if deleted_lines == 0:
-                print ("VM/CT ID " + group.id + " - No disk definintions from " + snapshot_in_config.name + " deleted, snapshot is consistent")
+                print ("VM/CT ID " + group.id + " - No disk definitions from " + snapshot_in_config.name + " deleted, snapshot is consistent")
             else:
                 print ("VM/CT ID " + group.id + " - Deleted " + str(deleted_lines) + " disks from " + snapshot_in_config.name + " as the snapshot can't be found on disk")
 
@@ -334,10 +334,13 @@ def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_comman
                     print (stderr)
                 else:
                     deleted_snaps = deleted_snaps +1
-            if pzm_common.test:
-                print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+            if deleted_snaps > 0:
+                if pzm_common.test:
+                    print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+                else:
+                    print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
             else:
-                print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+                print ("VM/CT ID " + group.id + " - Nothing to delete from " + disk.unique_name + ", snapshots are consistent")
 
 
     ##### Important, only delete the snapshot AFTER the config file was re-written, otherwise we would overwrite the deletions with the write command
@@ -351,7 +354,7 @@ def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_comman
         if not pzm_common.test:
             print ("VM/CT ID " + group.id + " - Deleting snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
         else:
-            print ("VM/CT ID " + group.id + " - Woudl delete snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
+            print ("VM/CT ID " + group.id + " - Would delete snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
 
         execute_command([vm_ct_interaction_command, 'delsnapshot', group.id, snapshot_to_delete.name])
 
