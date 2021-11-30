@@ -472,9 +472,8 @@ def restore(args, disk_groups):
 
         config_new = config.copy() #Copy to have to have the reference
 
+        ##### If backup config exists, compare it to the restored config and add those which are not present in the restored config to a "delete snapshot from disk" list
         snapshots_to_delete_from_disk = []
-
-        ##### If backup config exists, check it and delete all snapshots from disk which are not present in the restored config
         if len(old_config) > 0:
             matches_old_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(old_config), re.MULTILINE) #Find pattern: [autoWeekly_2021-11-28_00-25-02]
             matches_old_config = [x.replace('[', '').replace(']','') for x in matches_old_config] #remove square braces
@@ -488,6 +487,7 @@ def restore(args, disk_groups):
                 matches_old_config.remove(x)
             snapshots_to_delete_from_disk = matches_old_config
 
+        ##### Interate over disk, check config for snapshots which are no more present on disk and delete the references to the disk in the config file
         for disk in cleanup_disks:
             current_config_len = len(config_new) #To give the user an indication how much was changed per disk
 
@@ -535,6 +535,21 @@ def restore(args, disk_groups):
                 print ("VM/CT ID " + group.id + " - Deleted " + disk.unique_name + " from " + str(deleted_lines) + " snapshot entries, as the snapshots can't be found on disk")
 
 
+            ###### Delete snapshots from disk which were present in the old config, but not in the restored config
+            deleted_snaps = 0
+            for snapshot in set(snapshots_to_delete_from_disk).intersection(snapname_in_config):
+                rc, stout, stderr = execute_command(['zfs', 'destroy', disk.destination + '@' + snapshot])
+                if rc != 0:
+                    print (stdout)
+                    print (stderr)
+                else:
+                    deleted_snaps = deleted_snaps +1
+
+            if pzm_common.test:
+                print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as there are not defined in the restored config")
+            else:
+                print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as there are not defined in the restored config")
+
         if len(config) != len(config_new): #Config must have changed, if string list isn't of the same length anymore
             #print ("VM/CT ID " + group.id + " - Snapshots found in config which do not exist on disk, deleting them from config.")
             if not pzm_common.test:
@@ -548,6 +563,8 @@ def restore(args, disk_groups):
 
         #Unlock before next group
         execute_command([vm_ct_interaction_command, 'unlock', group.id])
+
+        ##### TODO: Check for snapshots in config, where no disks are defined anymore, and delete them completely
 
         print ("VM/CT ID " + group.id + " finished!")
     unlock(args.hostname)
