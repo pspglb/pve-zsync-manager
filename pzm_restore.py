@@ -145,6 +145,217 @@ def zfs_is_encrypted(dataset):
     else:
         return True
 
+### Does the restore of a group based on the previously gathered user input data
+def restore_group(group, args):    
+    ###### Start the restore progress
+    for disk in group.backed_up_disks:
+        ### If the disk is set to be restored as a whole from backup
+        if disk.restore:
+            print ("VM/CT ID " + group.id + " - restoring " + disk.destination)
+            rc, stdout, stderr = execute_readonly_command(['zfs', 'list', disk.destination])
+            if rc == 0:
+                rc, stdout, stderr, pid = execute_command(['zfs', 'destroy', '-r', disk.destination])
+                if rc != 0:
+                    print (stdout)
+                    print (stderr)
+                    continue
+            rc, stdout, stderr, pid = execute_command(['ssh -o \"BatchMode yes\" root@' + args.hostname + ' zfs send -Rw ' +  disk.last_snapshot + ' | zfs recv -F ' + disk.destination], shell=True)
+            if stderr != "":
+                print (stdout)
+                print (stderr)
+                continue
+
+            ### If a keyfile was specified, and the disk is/was encrypted load the key in
+            if args.keyfile is not None:
+                dataset_encrypted = zfs_is_encrypted(disk.destination)
+                parent_encrypted = zfs_is_encrypted(disk.destination.rsplit('/',1)[0])
+                if dataset_encrypted:
+                    rc, stdout, stderr, pid = execute_command(['zfs', 'set', 'keylocation=file://' + args.keyfile, disk.destination])
+                    if rc != 0:
+                        print (stdout)
+                        print (stderr)
+                        continue
+                    rc, stdout, stderr, pid = execute_command(['zfs', 'load-key', disk.destination])
+                    if rc != 0:
+                        print (stdout)
+                        print (stderr)
+                        continue
+                    ### If the parent zfs-dataset of the disk is also encrypted, inherit the key from it
+                    if parent_encrypted:
+                        rc, stdout, stderr, pid = execute_command(['zfs', 'change-key', '-i', disk.destination])
+                        if rc != 0:
+                            print (stdout)
+                            print (stderr)
+                            continue
+
+            rc, stdout, stderr, pid = execute_command(['zfs', 'mount', disk.destination])
+            if rc != 0:
+                print (stdout)
+                print (stderr)
+                continue
+
+        ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
+        elif disk.rollback:
+            print ("VM/CT ID " + group.id + " - rolling back " + disk.destination + " to " + disk.last_snapshot.split('@')[1])
+            rc, stdout, stderr, pid = execute_command(['zfs', 'rollback', '-r', disk.destination + '@' + disk.last_snapshot.split('@')[1]])
+            if rc != 0:
+                print (stdout)
+                print (stderr)
+                continue
+
+        ### Disk which are set to keep, will not alter any current data, but delete any newer snapshots than the timestamp of the restore disk
+        elif disk.keep:
+            print ("VM/CT ID " + group.id + " - destroying newer snapshots than " + disk.last_snapshot.split('@')[1] + " on " + disk.destination)
+            destroy_newer_snapshots(args, disk.destination, disk.last_snapshot)
+    
+### Recreates disks of a group which were not backed up to the remote side and user defined to do so
+def recreate_disks_of_group(group, vm_ct_interaction_command):
+    ###### Unlock for recreating #####
+    if len(group.non_backed_up_disks) > 0:
+        execute_command([vm_ct_interaction_command, 'unlock', group.id])
+
+    ###### Recreate disk if it was not backed up and set to recreate #####
+    for non_backed_up_disk in group.non_backed_up_disks:
+        if non_backed_up_disk.recreate:
+            print ("VM/CT ID " + group.id + " - Recreating " + non_backed_up_disk.unique_name)
+            #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
+            #options: "mp=/test,backup=1,size=8G" as list
+            options = non_backed_up_disk.config_line.split(',',1)[1].split(',')
+            #hardware_id: mp1, scsi1, sata1 etc
+            hardware_id = non_backed_up_disk.config_line.split(':', 1)[0]
+            #from "size=8G" to "8"
+            size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
+            #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
+
+            storage_pool = non_backed_up_disk.unique_name.split(':')[0]
+            rc, stdout, stderr, pid = execute_command([vm_ct_interaction_command, 'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size},{','.join(options)}"])
+            if rc != 0:
+                print (stdout)
+                print (stderr)
+                continue
+
+    ###### Lock again for next step #####
+    if len(group.non_backed_up_disks) > 0:
+        execute_command([vm_ct_interaction_command, 'set', group.id, '--lock=backup'])
+    
+###Checks consistency of snapshots on disk vs snapshots in the restored config
+def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_command):
+    print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this may take a while.")
+    cleanup_disks = group.backed_up_disks + group.non_backed_up_disks
+
+    config = []
+    with open(config_file_path, 'r') as config_file:
+        config = config_file.readlines()
+    config_new = config.copy() #Copy to have to have the reference
+
+
+    snapnames_in_config = execute_readonly_command([vm_ct_interaction_command, 'listsnapshot', group.id])[1].split('\n')
+    snapnames_in_config = [x.lstrip().split(' ')[1] for x in snapnames_in_config if "current" not in x and x not in pzm_common.considered_empty]
+
+
+    snapshots_in_config = [Snapshot(x) for x in snapnames_in_config]
+
+
+    ##### Iterate over all snapnames in the config file and search for inconsistencies
+    for snapshot_in_config in snapshots_in_config:
+        current_config_len = len(config_new)
+
+        rc, stdout, stderr = execute_readonly_command([vm_ct_interaction_command, 'config', group.id, '--snapshot', snapshot_in_config.name])
+        snapshot_config = stdout
+
+        for disk in cleanup_disks:
+            if disk.unique_name in snapshot_config: #If the disk is mentioned in the snapshot config, we have to check if the snapshot truly exists on the disk
+                if snapshot_in_config.name not in disk.get_all_snapshots_on_disk(): #If snapname_in_config is not in the list of snapshots on disk, delete it's reference
+                    if not pzm_common.test:
+                        if pzm_common.debug: print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapshot_in_config.name)
+                        #Delete this snapshot from the config
+                        #Read all lines from config, search for the snapshot name, delete the whole line where disk.unique_name is found at the next occourance
+                        found_snapshot = False
+                        config_tmp = []
+                        for line in config_new:
+                            if "[" + snapshot_in_config.name + "]" in line and "parent" not in line: #Found snapshot header. Can only occour once in config file
+                                found_snapshot = True
+                            if found_snapshot and disk.unique_name in line:
+                                #the snapshot was found previously and the line matches, skip writing that line, and set found_snapshot to False again
+                                #so it doesn't skip further occourance
+                                found_snapshot = False
+                            else:
+                                config_tmp.append(line)
+                        config_new = config_tmp
+                    else:
+                        if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapshot_in_config.name)
+                else:
+                    snapshot_in_config.keep_snapshot = True #Snapshot in config has at least one defined disk
+                    if pzm_common.debug: print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapshot_in_config.name + " is OK!")
+
+        if snapshot_in_config.keep_snapshot: #Only show this line, if the snapshot will be kept
+            deleted_lines = current_config_len - len(config_new)
+            if deleted_lines == 0:
+                print ("VM/CT ID " + group.id + " - No disk definintions from " + snapshot_in_config.name + " deleted, snapshot is consistent")
+            else:
+                print ("VM/CT ID " + group.id + " - Deleted " + str(deleted_lines) + " disks from " + snapshot_in_config.name + " as the snapshot can't be found on disk")
+
+    #Config must have changed, if string list isn't of the same length anymore
+    if len(config) != len(config_new):
+        if not pzm_common.test:
+            if pzm_common.debug: print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
+            with open(config_file_path, 'w') as config_file:
+                config_file.writelines(config_new)
+        else:
+            if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
+
+
+    ##### If backup config exists, compare it to the restored config and add those which are not present in the restored config to a "delete snapshot from disk" list
+    if (os.path.exists(config_file_path + ".backup")):
+        #Needed to delete snapshots from disk which are no more referenced
+        old_config = []
+        with open(config_file_path + ".backup", 'r') as old_config_file:
+            old_config = old_config_file.readlines()
+
+        matches_old_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(old_config), re.MULTILINE) #Find pattern: [autoWeekly_2021-11-28_00-25-02]
+        matches_old_config = [x.replace('[', '').replace(']','') for x in matches_old_config] #remove square braces
+
+        matches_restored_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(config_new), re.MULTILINE)
+        matches_restored_config = [x.replace('[', '').replace(']','') for x in matches_restored_config]
+
+        #Remove snapshots which are present in both config files from old config matches
+        #Old config matches should then only contain snapshot which are no more present on disk
+        for x in set(matches_old_config).intersection(matches_restored_config):
+            matches_old_config.remove(x)
+        snapshots_to_delete_from_disk = matches_old_config
+
+        ###### Delete snapshots from disk which were present in the old config, but not in the restored config
+        for disk in cleanup_disks:
+            deleted_snaps = 0
+            for snapshot in set(snapshots_to_delete_from_disk).intersection(snapnames_in_config):
+                rc, stout, stderr = execute_command(['zfs', 'destroy', disk.destination + '@' + snapshot])
+                if rc != 0:
+                    print (stdout)
+                    print (stderr)
+                else:
+                    deleted_snaps = deleted_snaps +1
+            if pzm_common.test:
+                print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+            else:
+                print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+
+
+    ##### Important, only delete the snapshot AFTER the config file was re-written, otherwise we would overwrite the deletions with the write command
+    snapshots_to_delete_completely = [snap for snap in snapshots_in_config if not snap.keep_snapshot]
+
+    ### Unlock for deleting snapshot
+    if len(snapshots_to_delete_completely) > 0:
+        execute_command([vm_ct_interaction_command, 'unlock', group.id])
+
+    for snapshot_to_delete in snapshots_to_delete_completely:
+        if not pzm_common.test:
+            print ("VM/CT ID " + group.id + " - Deleting snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
+        else:
+            print ("VM/CT ID " + group.id + " - Woudl delete snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
+
+        execute_command([vm_ct_interaction_command, 'delsnapshot', group.id, snapshot_to_delete.name])
+
+
 #Main method for the restore function. Will restore a backup made with pve-zsync-manager or pve-zsync according to the given input in gather_restore_data
 def restore(args, disk_groups):
     if not pzm_common.test: lock(args.hostname)
@@ -180,220 +391,13 @@ def restore(args, disk_groups):
             print (stderr)
             execute_command(['mv', config_file_path + '.backup', config_file_path])
             continue
+        
+        restore_group(group, args)
 
-        no_restore_count = 0
+        recreate_disks_of_group(group, vm_ct_interaction_command)
 
-        ###### Start the restore progress
-        for disk in group.backed_up_disks:
-            ### If the disk is set to be restored as a whole from backup
-            if disk.restore:
-                print ("VM/CT ID " + group.id + " - restoring " + disk.destination)
-                rc, stdout, stderr = execute_readonly_command(['zfs', 'list', disk.destination])
-                if rc == 0:
-                    rc, stdout, stderr, pid = execute_command(['zfs', 'destroy', '-r', disk.destination])
-                    if rc != 0:
-                        print (stdout)
-                        print (stderr)
-                        continue
-                rc, stdout, stderr, pid = execute_command(['ssh -o \"BatchMode yes\" root@' + args.hostname + ' zfs send -Rw ' +  disk.last_snapshot + ' | zfs recv -F ' + disk.destination], shell=True)
-                if stderr != "":
-                    print (stdout)
-                    print (stderr)
-                    continue
-
-                ### If a keyfile was specified, and the disk is/was encrypted load the key in
-                if args.keyfile is not None:
-                    dataset_encrypted = zfs_is_encrypted(disk.destination)
-                    parent_encrypted = zfs_is_encrypted(disk.destination.rsplit('/',1)[0])
-                    if dataset_encrypted:
-                        rc, stdout, stderr, pid = execute_command(['zfs', 'set', 'keylocation=file://' + args.keyfile, disk.destination])
-                        if rc != 0:
-                            print (stdout)
-                            print (stderr)
-                            continue
-                        rc, stdout, stderr, pid = execute_command(['zfs', 'load-key', disk.destination])
-                        if rc != 0:
-                            print (stdout)
-                            print (stderr)
-                            continue
-                        ### If the parent zfs-dataset of the disk is also encrypted, inherit the key from it
-                        if parent_encrypted:
-                            rc, stdout, stderr, pid = execute_command(['zfs', 'change-key', '-i', disk.destination])
-                            if rc != 0:
-                                print (stdout)
-                                print (stderr)
-                                continue
-
-                rc, stdout, stderr, pid = execute_command(['zfs', 'mount', disk.destination])
-                if rc != 0:
-                    print (stdout)
-                    print (stderr)
-                    continue
-
-            ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
-            elif disk.rollback:
-                no_restore_count = no_restore_count + 1
-                print ("VM/CT ID " + group.id + " - rolling back " + disk.destination + " to " + disk.last_snapshot.split('@')[1])
-                rc, stdout, stderr, pid = execute_command(['zfs', 'rollback', '-r', disk.destination + '@' + disk.last_snapshot.split('@')[1]])
-                if rc != 0:
-                    print (stdout)
-                    print (stderr)
-                    continue
-
-            ### Disk which are set to keep, will not alter any current data, but delete any newer snapshots than the timestamp of the restore disk
-            elif disk.keep:
-                no_restore_count = no_restore_count + 1
-                print ("VM/CT ID " + group.id + " - destroying newer snapshots than " + disk.last_snapshot.split('@')[1] + " on " + disk.destination)
-                destroy_newer_snapshots(args, disk.destination, disk.last_snapshot)
-
-
-
-        ###### Unlock for recreating #####
-        if len(group.non_backed_up_disks) > 0:
-            execute_command([vm_ct_interaction_command, 'unlock', group.id])
-
-        ###### Recreate disk if it was not backed up and set to recreate #####
-        for non_backed_up_disk in group.non_backed_up_disks:
-            if non_backed_up_disk.recreate:
-                print ("VM/CT ID " + group.id + " - Recreating " + non_backed_up_disk.unique_name)
-                #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
-                #options: "mp=/test,backup=1,size=8G" as list
-                options = non_backed_up_disk.config_line.split(',',1)[1].split(',')
-                #hardware_id: mp1, scsi1, sata1 etc
-                hardware_id = non_backed_up_disk.config_line.split(':', 1)[0]
-                #from "size=8G" to "8"
-                size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
-                #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
-
-                storage_pool = non_backed_up_disk.unique_name.split(':')[0]
-                rc, stdout, stderr, pid = execute_command([vm_ct_interaction_command, 'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size},{','.join(options)}"])
-                if rc != 0:
-                    print (stdout)
-                    print (stderr)
-                    continue
-
-        ###### Lock again for snapshot cleanup #####
-        if len(group.non_backed_up_disks) > 0:
-            execute_command([vm_ct_interaction_command, 'set', group.id, '--lock=backup'])
-
-
-        ############################################################## Snapshot consitency check ####################################################################
-
-        print ("VM/CT ID " + group.id + " - Checking snapshot consistency, this may take a while.")
-        cleanup_disks = group.backed_up_disks + group.non_backed_up_disks
-
-        config = []
-        with open(config_file_path, 'r') as config_file:
-            config = config_file.readlines()
-        config_new = config.copy() #Copy to have to have the reference
-
-
-        snapnames_in_config = execute_readonly_command([vm_ct_interaction_command, 'listsnapshot', group.id])[1].split('\n')
-        snapnames_in_config = [x.lstrip().split(' ')[1] for x in snapnames_in_config if "current" not in x and x not in pzm_common.considered_empty]
-
-
-        snapshots_in_config = [Snapshot(x) for x in snapnames_in_config]
-
-
-        ##### Iterate over all snapnames in the config file and search for inconsistencies
-        for snapshot_in_config in snapshots_in_config:
-            current_config_len = len(config_new)
-
-            rc, stdout, stderr = execute_readonly_command([vm_ct_interaction_command, 'config', group.id, '--snapshot', snapshot_in_config.name])
-            snapshot_config = stdout
-
-            for disk in cleanup_disks:
-                if disk.unique_name in snapshot_config: #If the disk is mentioned in the snapshot config, we have to check if the snapshot truly exists on the disk
-                    if snapshot_in_config.name not in disk.get_all_snapshots_on_disk(): #If snapname_in_config is not in the list of snapshots on disk, delete it's reference
-                        if not pzm_common.test:
-                            if pzm_common.debug: print ("VM/CT ID " + group.id + " - Deleting reference of " + disk.unique_name + " in snapshot " + snapshot_in_config.name)
-                            #Delete this snapshot from the config
-                            #Read all lines from config, search for the snapshot name, delete the whole line where disk.unique_name is found at the next occourance
-                            found_snapshot = False
-                            config_tmp = []
-                            for line in config_new:
-                                if "[" + snapshot_in_config.name + "]" in line and "parent" not in line: #Found snapshot header. Can only occour once in config file
-                                    found_snapshot = True
-                                if found_snapshot and disk.unique_name in line:
-                                    #the snapshot was found previously and the line matches, skip writing that line, and set found_snapshot to False again
-                                    #so it doesn't skip further occourance
-                                    found_snapshot = False
-                                else:
-                                    config_tmp.append(line)
-                            config_new = config_tmp
-                        else:
-                            if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would delete reference of " + disk.unique_name + " in snapshot " + snapshot_in_config.name)
-                    else:
-                        snapshot_in_config.keep_snapshot = True #Snapshot in config has at least one defined disk
-                        if pzm_common.debug: print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapshot_in_config.name + " is OK!")
-
-            if snapshot_in_config.keep_snapshot: #Only show this line, if the snapshot will be kept
-                deleted_lines = current_config_len - len(config_new)
-                if deleted_lines == 0:
-                    print ("VM/CT ID " + group.id + " - No disk definintions from " + snapshot_in_config.name + " deleted, snapshot is consistent")
-                else:
-                    print ("VM/CT ID " + group.id + " - Deleted " + str(deleted_lines) + " disks from " + snapshot_in_config.name + " as the snapshot can't be found on disk")
-
-        #Config must have changed, if string list isn't of the same length anymore
-        if len(config) != len(config_new):
-            if not pzm_common.test:
-                if pzm_common.debug: print ("VM/CT ID " + group.id + " - Writing new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
-                with open(config_file_path, 'w') as config_file:
-                    config_file.writelines(config_new)
-            else:
-                if pzm_common.debug: print ("VM/CT ID " + group.id + " - Would write new config file for " + group.id + ", as file has changed by " + str(len(config)-len(config_new)) + " lines.")
-
-
-        ##### If backup config exists, compare it to the restored config and add those which are not present in the restored config to a "delete snapshot from disk" list
-        if (os.path.exists(config_file_path + ".backup")):
-            #Needed to delete snapshots from disk which are no more referenced
-            old_config = []
-            with open(config_file_path + ".backup", 'r') as old_config_file:
-                old_config = old_config_file.readlines()
-
-            matches_old_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(old_config), re.MULTILINE) #Find pattern: [autoWeekly_2021-11-28_00-25-02]
-            matches_old_config = [x.replace('[', '').replace(']','') for x in matches_old_config] #remove square braces
-
-            matches_restored_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(config_new), re.MULTILINE)
-            matches_restored_config = [x.replace('[', '').replace(']','') for x in matches_restored_config]
-
-            #Remove snapshots which are present in both config files from old config matches
-            #Old config matches should then only contain snapshot which are no more present on disk
-            for x in set(matches_old_config).intersection(matches_restored_config):
-                matches_old_config.remove(x)
-            snapshots_to_delete_from_disk = matches_old_config
-
-            ###### Delete snapshots from disk which were present in the old config, but not in the restored config
-            for disk in cleanup_disks:
-                deleted_snaps = 0
-                for snapshot in set(snapshots_to_delete_from_disk).intersection(snapnames_in_config):
-                    rc, stout, stderr = execute_command(['zfs', 'destroy', disk.destination + '@' + snapshot])
-                    if rc != 0:
-                        print (stdout)
-                        print (stderr)
-                    else:
-                        deleted_snaps = deleted_snaps +1
-                if pzm_common.test:
-                    print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
-                else:
-                    print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
-
-
-        ##### Important, only delete the snapshot AFTER the config file was re-written, otherwise we would overwrite the deletions with the write command
-        snapshots_to_delete_completely = [snap for snap in snapshots_in_config if not snap.keep_snapshot]
-
-        ### Unlock for deleting snapshot
-        if len(snapshots_to_delete_completely) > 0:
-            execute_command([vm_ct_interaction_command, 'unlock', group.id])
-
-        for snapshot_to_delete in snapshots_to_delete_completely:
-            if not pzm_common.test:
-                print ("VM/CT ID " + group.id + " - Deleting snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
-            else:
-                print ("VM/CT ID " + group.id + " - Woudl delete snapshot " + snapshot_to_delete.name  + " as it doesn't exist on any disk")
-
-            execute_command([vm_ct_interaction_command, 'delsnapshot', group.id, snapshot_to_delete.name])
-
-
+        #Note: config will be unlocked after snapshot_consistency check. Has to be locked again if additional steps are applied after this function call
+        snapshot_consistency_check(group, config_file_path, vm_ct_interaction_command)
+        
         print ("VM/CT ID " + group.id + " finished!")
     unlock(args.hostname)
