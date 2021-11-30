@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 
-import time
-import datetime
 import os
 import re
-import sys
 
 from Classes.Backed_Up_Disk import Backed_Up_Disk
 from Classes.Disk_Group import Disk_Group
@@ -12,12 +9,8 @@ from Classes.Snapshot import Snapshot
 
 
 import pzm_common
-from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug
+from pzm_common import execute_readonly_command, execute_command, check_zfs_pool
 from pzm_locking import lock, unlock
-
-
-
-
 
 #Parses all zfs disks on the remote side (with an optional filter), and asks the user what should be done to each individual disk.
 def gather_restore_data(args):
