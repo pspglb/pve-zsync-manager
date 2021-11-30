@@ -419,7 +419,7 @@ def restore(args, disk_groups):
         ###### Unlock for recreating #####
         execute_command([vm_ct_interaction_command, 'unlock', group.id])
 
-        ###### Recreate disk if it was ot backed up and set to recreate #####
+        ###### Recreate disk if it was not backed up and set to recreate #####
         for non_backed_up_disk in group.non_backed_up_disks:
             if non_backed_up_disk.recreate:
                 print ("VM/CT ID " + group.id + " - Recreating " + non_backed_up_disk.unique_name)
@@ -471,6 +471,23 @@ def restore(args, disk_groups):
             snapnames_in_config.pop(snapnames_in_config.index("current"))
 
         config_new = config.copy() #Copy to have to have the reference
+
+        snapshots_to_delete_from_disk = []
+
+        ##### If backup config exists, check it and delete all snapshots from disk which are not present in the restored config
+        if len(old_config) > 0:
+            matches_old_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(old_config), re.MULTILINE) #Find pattern: [autoWeekly_2021-11-28_00-25-02]
+            matches_old_config = [x.replace('[', '').replace(']','') for x in matches_old_config] #remove square braces
+
+            matches_restored_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(config_new), re.MULTILINE)
+            matches_restored_config = [x.replace('[', '').replace(']','') for x in matches_restored_config]
+
+            #Remove snapshots which are present in both config files from old config matches
+            #Old config matches should then only contain snapshot which are no more present on disk
+            for x in set(matches_old_config).intersection(matches_restored_config):
+                matches_old_config.remove(x)
+            snapshots_to_delete_from_disk = matches_old_config
+
         for disk in cleanup_disks:
             current_config_len = len(config_new) #To give the user an indication how much was changed per disk
 
@@ -516,22 +533,6 @@ def restore(args, disk_groups):
                 print ("VM/CT ID " + group.id + " - No entries of " + disk.unique_name + " deleted, snapshots are consistent")
             else:
                 print ("VM/CT ID " + group.id + " - Deleted " + disk.unique_name + " from " + str(deleted_lines) + " snapshot entries, as the snapshots can't be found on disk")
-
-            ##### If backup config exists, check it and delete all snapshots from disk which are not present in the restored config
-            if len(old_config) > 0:
-                matches_old_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(old_config), re.MULTILINE) #Find pattern: [autoWeekly_2021-11-28_00-25-02]
-                matches_old_config = [x.replace('[', '').replace(']','') for x in matches_old_config] #remove square braces
-                
-                matches_restored_config = re.findall(r"^\[[\w\d\_\-]+\]$", ''.join(config_new), re.MULTILINE)
-                matches_restored_config = [x.replace('[', '').replace(']','') for x in matches_restored_config]
-                
-                
-                #Remove snapshots which are present in both config files from old config matches
-                #Old config matches should then only contain snapshot which are no more present on dis
-                for x in set(matches_old_config).intersection(matches_restored_config): 
-                    matches_old_config.remove(x)
-                    
-                    
 
 
         if len(config) != len(config_new): #Config must have changed, if string list isn't of the same length anymore
