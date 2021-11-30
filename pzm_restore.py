@@ -288,7 +288,7 @@ def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_comman
                     snapshot_in_config.keep_snapshot = True #Snapshot in config has at least one defined disk
                     if pzm_common.debug: print ("VM/CT ID " + group.id + " - Disk " + disk.unique_name + " - snapshot " + snapshot_in_config.name + " is OK!")
 
-        if snapshot_in_config.keep_snapshot: #Only show this line, if the snapshot will be kept
+        if snapshot_in_config.keep_snapshot and pzm_common.debug: #Only show this line, if the snapshot will be kept
             deleted_lines = current_config_len - len(config_new)
             if deleted_lines == 0:
                 print ("VM/CT ID " + group.id + " - No disk definitions from " + snapshot_in_config.name + " deleted, snapshot is consistent")
@@ -334,13 +334,14 @@ def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_comman
                     print (stderr)
                 else:
                     deleted_snaps = deleted_snaps +1
-            if deleted_snaps > 0:
-                if pzm_common.test:
-                    print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+            if pzm_common.debug:
+                if deleted_snaps > 0:
+                    if pzm_common.test:
+                        print ("Would have deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
+                    else:
+                        print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
                 else:
-                    print ("Deleted " + str(deleted_snaps) + " snapshots from " + disk.unique_name + " as they are not defined in the restored config")
-            else:
-                print ("VM/CT ID " + group.id + " - Nothing to delete from " + disk.unique_name + ", snapshots are consistent")
+                    print ("VM/CT ID " + group.id + " - Nothing to delete from " + disk.unique_name + ", snapshots are consistent")
 
 
     ##### Important, only delete the snapshot AFTER the config file was re-written, otherwise we would overwrite the deletions with the write command
