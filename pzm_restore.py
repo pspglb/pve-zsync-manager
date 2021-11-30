@@ -11,13 +11,15 @@ from pzm_common import execute_readonly_command, execute_command, check_zfs_pool
 from pzm_locking import lock, unlock
 
 
-def get_unique_name_from_config_line(config_line):
-    #from for example rootfs: vmssd:subvol-100-disk-0,mountpoint=.... to vmssd:subvol-100-disk-0
-    return config_line.split(',')[0].split(':',1)[1].replace(' ','')
 
 #Disc class for the restore function.
 #Each disk has a Name/ID, latest snaoshot, destination (aka pool) and a vm/ct config file
 class Disk:
+    @staticmethod
+    def get_unique_name_from_config_line(config_line):
+        #from for example rootfs: vmssd:subvol-100-disk-0,mountpoint=.... to vmssd:subvol-100-disk-0
+        return config_line.split(',')[0].split(':',1)[1].replace(' ','')
+    
     def parse_id(self):
         id = self.name.split('-')[1]
         return id
@@ -34,7 +36,7 @@ class Disk:
         diskconfig = [element for element in stdout if (self.name in element)]
         disk = ""
         if len(diskconfig) == 1:
-            disk = get_unique_name_from_config_line(diskconfig[0])
+            disk = Disk.get_unique_name_from_config_line(diskconfig[0])
         elif len(diskconfig) > 1: #Must have used the new prepent-dataset-id flag of pve-zsync, as pve-zsync would not work in that case
             #we get the destination pool from full_names pre last dataset name which is the pve-storage id if it was sent with prepent-dataset-id
             #Example: backuppool/vmsys/subvol-100-disk-0: self.full_name.split('/')[-2] will be "vmsys", self.name subvol-100-disk-0
@@ -138,7 +140,7 @@ class Backed_Up_Disk(Disk):
 class Non_Backed_Up_Disk(Disk):
     def __init__(self, config_file, config_line, type):
         super().__init__()
-        self.unique_name = get_unique_name_from_config_line(config_line)
+        self.unique_name = Disk.get_unique_name_from_config_line(config_line)
         self.type = type
         self.config_line = config_line
         self.destination = self.get_destination()
@@ -180,7 +182,7 @@ class Disk_Group:
 
 
         #Only use disks, which were not found at the backup location
-        parsed_non_backed_up_disk_config_lines = [element for element in all_disks if len([backed_up_disk for backed_up_disk in self.backed_up_disks if get_unique_name_from_config_line(element) in backed_up_disk.unique_name]) == 0]
+        parsed_non_backed_up_disk_config_lines = [element for element in all_disks if len([backed_up_disk for backed_up_disk in self.backed_up_disks if Disk.get_unique_name_from_config_line(element) in backed_up_disk.unique_name]) == 0]
 
 
         for config_line in parsed_non_backed_up_disk_config_lines:
