@@ -47,6 +47,7 @@ def initialize(name, enable_logging=True):
     logger.setLevel(logging.DEBUG)
     if enable_logging:
         logger.addHandler(log_file_handler)
+        logger.log(logging.INFO, "==================== Started with " + name + " command ====================")
 
 #Log to stdout
 def log(data, severity = logging.INFO):
