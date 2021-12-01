@@ -2,7 +2,6 @@
 
 import pzm_common
 from pzm_common import execute_readonly_command, log
-import sys
 
 #Disc class for the restore function.
 #Each disk has a Name/ID, latest snaoshot, destination (aka pool) and a vm/ct config file
@@ -19,8 +18,7 @@ class Disk:
     def get_unique_name(self, hostname, config_file):
         rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', config_file])
         if (rc != 0):
-            log ("(SSH) Get config path command error: " + stderr)
-            sys.exit(1)
+            raise Exception ("(SSH) Get config path command error: " + stderr)
         stdout = stdout.split('\n\n')[0] #Read only first block of Configfile
         stdout = stdout.split('\n')
         for x in set(stdout).intersection(pzm_common.considered_empty):
@@ -41,8 +39,7 @@ class Disk:
     def get_destination(self):
         rc, stdout, stderr = execute_readonly_command(['pvesm', 'path', self.unique_name])
         if (rc != 0):
-            log ("pvesm command error: " + stderr)
-            sys.exit(1)
+            raise Exception ("pvesm command error: " + stderr)
         destination = stdout.split('\n')
         for x in set(destination).intersection(pzm_common.considered_empty):
             destination.remove(x)

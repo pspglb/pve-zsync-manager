@@ -3,14 +3,12 @@
 import pzm_common
 from Classes.Disk import Disk
 from pzm_common import execute_readonly_command, log, log_debug
-import sys
 
 class Backed_Up_Disk(Disk):
     def get_last_snapshot(self, hostname, backupname):
         rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'zfs', 'list', '-t', 'snapshot', '-H', '-o', 'name', self.full_name])
         if (rc != 0):
-            log ("(SSH) ZFS command error: " + stderr)
-            sys.exit(1)
+            raise Exception("(SSH) ZFS command error: " + stderr)
         stdout = stdout.split('\n')
         for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)
@@ -26,8 +24,7 @@ class Backed_Up_Disk(Disk):
     def get_last_config(self, hostname, configs_path):
         rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'ls', '-l', configs_path])
         if (rc != 0):
-            log ("(SSH) ls -l command error: " + stderr)
-            sys.exit(1)
+            raise Exception("(SSH) ls -l command error: " + stderr)
         stdout = stdout.split('\n')
         for x in set(stdout).intersection(pzm_common.considered_empty):
             stdout.remove(x)

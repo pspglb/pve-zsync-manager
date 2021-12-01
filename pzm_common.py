@@ -144,12 +144,10 @@ def get_ids(command, including, excluding):
 def check_zfs_pool(hostname,zfspool):
     rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'zfs' ,'list', '-rH', '-o', 'name'])
     if stderr != "":
-        log ("(SSH) Error while getting zfs list names " + stderr)
-        sys.exit(1)
+        raise Exception ("(SSH) Error while getting zfs list names " + stderr)
     else:
         if zfspool not in stdout:
-            log ("ZFS Pool " + zfspool + " does not exist on " + hostname)
-            sys.exit(1)
+            raise Exception ("ZFS Pool " + zfspool + " does not exist on " + hostname)
         else:
             return stdout
 

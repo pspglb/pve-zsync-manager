@@ -127,6 +127,8 @@ def main():
         except KeyboardInterrupt:
             log ("Interupted by User", logging.WARN)
             sys.exit(1)
+        except Exception: #Also unlock at any other exception
+                log (traceback.format_exc(), logging.CRITICAL)
         if disk_groups is not None:
             try:
                 restore(args, disk_groups)

@@ -1,7 +1,6 @@
 
 #!/usr/bin/env python3
 
-import sys
 import pzm_common
 from Classes.Backed_Up_Disk import Backed_Up_Disk
 from Classes.Non_Backed_Up_Disk import Non_Backed_Up_Disk
@@ -35,8 +34,7 @@ class Disk_Group:
 
         rc, stdout, stderr = execute_readonly_command(['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'cat', configs_path + '/' + self.get_last_config()])
         if (rc != 0):
-            log ("(SSH) Get config path command error: " + stderr)
-            sys.exit(1)
+            raise Exception("(SSH) Get config path command error: " + stderr)
         stdout = stdout.split('\n\n')[0] #Read only first block of Configfile
         stdout = stdout.split('\n')
         for x in set(stdout).intersection(pzm_common.considered_empty):
