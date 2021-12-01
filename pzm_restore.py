@@ -49,9 +49,9 @@ def gather_restore_data(args):
 
         print ("ID: " + group.id)
         for disk in group.backed_up_disks:
-            input_data = input ("Restore Disk from " + disk.last_snapshot + " to " + disk.destination + "? (y/n): ").lower()
+            input_data = log_input ("Restore Disk from " + disk.last_snapshot + " to " + disk.destination + "? (y/n): ").lower()
             while not (input_data == 'y' or input_data == 'n'):
-                input_data = input ("Please answer y/n: ").lower()
+                input_data = log_input ("Please answer y/n: ").lower()
             if input_data == 'y':
                 disk.restore = True
 
@@ -64,9 +64,9 @@ def gather_restore_data(args):
                     #Check if it exists locally or if it's in the config, if not, warn user about it later that the The VM/CT will be restored in a broken state
                     rc, stdout, stderr = execute_readonly_command(['zfs', 'list', no_restore_disk.destination])
                     if rc == 0 : #It it was found, ask for it's fate
-                        input_data = input ("Fate of " + no_restore_disk.unique_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ").lower()
+                        input_data = log_input ("Fate of " + no_restore_disk.unique_name + " - Rollback to same timestamp or keep current data and destroy all newer snapshots? (rollback/keep): ").lower()
                         while not (input_data == 'rollback' or input_data == 'keep'):
-                            input_data = input ("Please answer rollback/keep: ").lower()
+                            input_data = log_input ("Please answer rollback/keep: ").lower()
                         if input_data == 'rollback':
                             no_restore_disk.rollback = True
                         elif input_data == 'keep':
@@ -84,9 +84,9 @@ def gather_restore_data(args):
             for non_backed_up_disk in group.non_backed_up_disks:
                 rc, stdout, stderr = execute_readonly_command(['zfs', 'list', non_backed_up_disk.destination])
                 if rc != 0: #Only ask if a disk should be recreated, if it doesn't already exist locally
-                    input_data = input ("Disk " + non_backed_up_disk.unique_name + " was not backed up. Should it be recreated? (y/n): ").lower()
+                    input_data = log_input ("Disk " + non_backed_up_disk.unique_name + " was not backed up. Should it be recreated? (y/n): ").lower()
                     while not (input_data == 'y' or input_data == 'n'):
-                        input_data = input ("Please answer y/n: ").lower()
+                        input_data = log_input ("Please answer y/n: ").lower()
                     if input_data == 'y':
                         non_backed_up_disk.recreate = True
                 else:
@@ -116,7 +116,7 @@ def gather_restore_data(args):
                 print ("DON'T RECREATE: " + non_backed_up_disk.unique_name)
 
     print ("")
-    input_data = input ("Is the information correct? (y): ".lower())
+    input_data = log_input ("Is the information correct? (y): ").lower()
     if input_data == 'y':
        return disk_groups
     else:

@@ -37,6 +37,8 @@ def initialize(name, enable_logging=True):
     #Logging
     logging.addLevelName(logging.DEBUG + 5, "VERBOSE")
     logging.VERBOSE = logging.DEBUG + 5
+    logging.addLevelName(logging.INFO + 1, "USRINPUT")
+    logging.USRINPUT = logging.INFO + 1
     log_file_handler = RotatingFileHandler(filename=f"/var/log/pzm_{name}.log", encoding="utf-8", maxBytes=10485760, backupCount=10)
     log_file_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     log_file_handler.setFormatter(log_file_formatter)
@@ -79,7 +81,7 @@ def log_debug(data):
 def log_input(data):
     global logger
     input_data = input(data)
-    logger.log(logging.INFO, str(data) + str(input_data))
+    logger.log(logging.USRINPUT, str(data) + str(input_data))
     return input_data
 
 #Execute command will not alter anything. These commands can be executed as normal in "TEST" mode
