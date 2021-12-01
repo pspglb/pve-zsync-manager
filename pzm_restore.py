@@ -9,7 +9,7 @@ from Classes.Snapshot import Snapshot
 
 
 import pzm_common
-from pzm_common import execute_readonly_command, execute_command, check_zfs_pool
+from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_verbose, log_debug, log_input
 from pzm_locking import lock, unlock
 
 #Parses all zfs disks on the remote side (with an optional filter), and asks the user what should be done to each individual disk.

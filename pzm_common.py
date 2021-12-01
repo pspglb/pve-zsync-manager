@@ -75,6 +75,13 @@ def log_debug(data):
     else:
         logger.log(logging.DEBUG, data)
 
+#Userinput should be displayed and logged
+def log_input(data):
+    global logger
+    input_data = input(data)
+    logger.log(logging.INFO, str(data) + str(input_data))
+    return input_data
+
 #Execute command will not alter anything. These commands can be executed as normal in "TEST" mode
 def execute_readonly_command(command):
     log_debug ("Executing command: " + " ".join(command))
