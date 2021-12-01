@@ -134,7 +134,7 @@ def unlock_remote(hostname):
     log_debug("Remotely unlocked")
 
 #Release to local lock
-def unlock_local():
+def unlock_local(hostname):
     global locked
     global local_locked_here
     if local_locked_here: #Only delete if it was remote locked here
@@ -183,4 +183,4 @@ def unlock(hostname):
     if remote_locked_here or local_locked_here or locked:
         log("Releasing locks")
     unlock_remote(hostname)
-    unlock_local()
+    unlock_local(hostname)

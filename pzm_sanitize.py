@@ -1,9 +1,11 @@
+import logging
 import time
 import datetime
 import os
+import sys
 
 import pzm_common
-from pzm_common import execute_readonly_command, execute_command, log, log_debug, get_ids
+from pzm_common import execute_readonly_command, execute_command, log, log_debug, log_verbose, get_ids
 
 #get the lastest snapshot of dataset, or zvol
 def get_latest_snapshot(dataset_name, backupname):
@@ -81,8 +83,8 @@ def sanitize(args):
     for id in ctids:
         disks = disks + parse_dataset("lxc", id)
 
-    log_debug (disks)
-    log_debug ("Count: " + str(len(disks)))
+    log_verbose (disks)
+    log_verbose ("Count: " + str(len(disks)))
 
     for disk in disks:
         latest_snap = get_latest_snapshot(disk.split(':')[1], args.backupname)
@@ -98,8 +100,8 @@ def sanitize(args):
                     if stdout.index(rollback_to) < len(stdout)-1:
                         rc, stdout, stderr, pid = execute_command(['ssh', '-o', 'BatchMode yes', 'root@' + args.hostname, 'zfs', 'rollback', '-r', rollback_to])
                         if stdout != "" or stderr != "":
-                            log (stdout)
-                            log (stderr)
+                            log (stdout, logging.ERROR)
+                            log (stderr, logging.ERROR)
             else: #Add pve-zsync 2.1-1 function "prepend-storage-id" - if it can't find a backup with <zfs-destination-pool>/disk it tries with <zfs-destination-pool>/<pve-storage-id>/disk
                 rollback_to = args.zfspool + '/' + disk.split(':')[0]  + '/' + latest_snap.split('/')[-1] #prepend-storage-id adds the pve storage id between the destination pool and the dataset"
 
@@ -114,5 +116,5 @@ def sanitize(args):
                         if stdout.index(rollback_to) < len(stdout)-1:
                             rc, stdout, stderr, pid = execute_command(['ssh', '-o', 'BatchMode yes', 'root@' + args.hostname, 'zfs', 'rollback', '-r', rollback_to])
                             if stdout != "" or stderr != "":
-                                log (stdout)
-                                log (stderr)
+                                log (stdout, logging.ERROR)
+                                log (stderr, logging.ERROR)

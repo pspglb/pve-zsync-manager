@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 import time
 import datetime
 import os
@@ -9,12 +10,10 @@ import sys
 from json.decoder import JSONDecodeError
 
 import pzm_common
-from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug, get_ids
+from pzm_common import execute_readonly_command, execute_command, check_zfs_pool, log, log_debug, log_verbose, get_ids
 from pzm_locking import lock, unlock
 from pzm_sanitize import sanitize
 
-#Where errorlogs are stored
-logpath = "/var/log/pve-zsync"
 
 #Removed CT/VM IDs which no longer exist from the status file.
 def cleanup_json(delete = ""):
@@ -46,21 +45,6 @@ def cleanup_json(delete = ""):
                  }
         with open(pzm_common.statusJsonFile, "w") as jsonFile:
             json.dump(newData, jsonFile, indent=4)
-
-#Delete logfiles from errored syncs if they are older than 7 days.
-def cleanup_logfolder():
-    if not os.path.exists(logpath):
-        return
-    for f in os.listdir(logpath):
-        if os.stat(os.path.join(logpath,f)).st_mtime < time.time() - 7 * 86400:
-            os.remove(os.path.join(logpath,f))
-
-#Write error logfile
-def write_logfile(data, logfilename):
-    if not os.path.exists(logpath):
-        os.makedirs(logpath)
-    with open(os.path.join(logpath,logfilename), 'w') as logfile:
-        logfile.write(data)
 
 
 #Write status to json status file
@@ -145,15 +129,13 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
         rc, stdout, stderr, pid = execute_command(command)
         tries = 0
 
-        logfilestrings = ""
         if retries is not None:
             while retries > tries and rc != 0:
                 if "include no disk on zfs" in stderr:
                     break #break the retry loop cause "include no disk on zfs" is not an error... just skip this vm/ct id instead
-                write_logfile(stderr, str(pid) + '.err')
-                logfilestrings = str(pid) + '.err' + " "
+                log (stderr, logging.ERROR)
                 tries+=1
-                log ("Failed, will retry after 30 seconds...")
+                log ("Failed, will retry after 30 seconds...", logging.WARN)
                 time.sleep(30)
                 log ("Sanitizing remote side...")
                 innerArgs = type('innerArgs', (object,),
@@ -171,29 +153,28 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
                 if not pzm_common.test:
                     cleanup_json(id)
                     continue #"include no disk on zfs" is not an error... just skip this vm/ct id and continue with the next. We don't need log data either
-            log (stderr)
-            log ("Command: \"" + ' '.join(command) + "\" failed " + str(tries+1) + " times, no retries left")
-            log ("ID " + id + " failed. Took " + str(duration))
+            log (stderr, logging.ERROR)
+            log ("Command: \"" + ' '.join(command) + "\" failed " + str(tries+1) + " times, no retries left", logging.ERROR)
+            log ("ID " + id + " failed. Took " + str(duration), logging.ERROR)
             failedOnce = True
             response = response + "ID " + id + " - ERROR - Took " + str(duration) +"\n"
-            write_logfile(stderr, str(pid) + '.err')
             if not pzm_common.test:
-                write_to_json(id, backupname, starttime.strftime(timeformat), endtime.strftime(timeformat), str(duration), "-", "error" ,"Errorlog at " + os.path.join(logpath,str(pid) + ".err"))
+                write_to_json(id, backupname, starttime.strftime(timeformat), endtime.strftime(timeformat), str(duration), "-", "error" , "Details see log file")
         else:
             log ("ID " + id + " done successfully with " + str (tries+1) + " attempts. Took " + str(duration))
             response = response + "ID " + id + " - OK! - Took " + str(duration) + "\n"
             additionalMessage = ""
             if tries > 0:
-                additionalMessage = "Needed " + str(tries) + " additional retries, check " + os.path.join(logpath) + "[" + logfilestrings + "]"
+                additionalMessage = "Needed " + str(tries) + " additional retries, for details check logfile"
             if not pzm_common.test:
-                estimated_total_size_matches = re.findall(r"total estimated size is.*", stderr)
+                estimated_total_size_matches = re.findall(r"total estimated size is.*", stderr, re.MULTILINE)
                 estimated_size = ""
                 if len(estimated_total_size_matches) > 0:
                     for estimated_total_size_match in estimated_total_size_matches:
                        estimated_size_carved_match = re.search(r'(\d+(\.\d+)?(B|K|M|G|T))', estimated_total_size_match)
                        if estimated_size_carved_match is not None:
                            estimated_size = estimated_size + estimated_size_carved_match.group() + ","
-                    log_debug ("Sent size: " + str(estimated_size[:-1]))
+                    log_verbose ("Sent size: " + str(estimated_size[:-1]))
                     estimated_size = estimated_size[:-1] #Remove trailing ","
                 else:
                     estimated_size = "-"
@@ -225,12 +206,12 @@ def sync(args):
             if id.startswith('-'):
                 exclude_ids.append(id.replace("-", ""))
             else:
-                print ("Do not use \"all\" in combination with other, non excluding ids!")
+                log ("Do not use \"all\" in combination with other, non excluding ids!", logging.CRITICAL)
                 sys.exit(2)
     else:
         for id in id_list:
             if id.startswith('-'):
-                print ("Do not use excluding IDs without \"all\"!")
+                log ("Do not use excluding IDs without \"all\"!", logging.CRITICAL)
                 sys.exit(2)
             else:
                 include_ids.append(id)
@@ -240,12 +221,11 @@ def sync(args):
 
     backup_ids = list(dict.fromkeys(vmids + ctids))
 
-    log_debug ("IDs to Backup: " + str(backup_ids))
-    log_debug ("Count: " + str(len(backup_ids)))
+    log_verbose ("IDs to Backup: " + str(backup_ids))
+    log_verbose ("Count: " + str(len(backup_ids)))
 
     if len(backup_ids) > 0:
         lock(args.hostname)
-        cleanup_logfolder()
         response = backup(args.hostname, args.zfspool, args.backupname, backup_ids, args.replicate, args.raw, args.properties, args.maxsnap, args.retries, args.prepend_storage_id, args.dest_config_path)
         cleanup_json()
         unlock(args.hostname)
