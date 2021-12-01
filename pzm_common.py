@@ -4,6 +4,8 @@ import subprocess
 import datetime
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
+
 
 #Colors for fancy output
 class bcolors:
@@ -17,7 +19,6 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-from logging.handlers import RotatingFileHandler
 
 def initialize(name, enable_logging=True):
     global debug
