@@ -153,7 +153,14 @@ def zfs_is_encrypted(dataset, hostname=None):
         return True
 
 ### Does the restore of a group based on the previously gathered user input data
-def restore_group(group, args):
+def restore_group(group, vm_ct_interaction_command, args):
+    config_data = ""
+    #Only read data once
+    if not args.replicate and group.type == "lxc": #### If the dataset is not replicated, we need the size info from the config. Only on LXC
+        rc, stdout, stderr = execute_readonly_command([vm_ct_interaction_command, 'config', group.id])
+        if rc == 0:
+            config_data = stdout
+
     ###### Start the restore progress
     for disk in group.backed_up_disks:
         ### If the disk is set to be restored as a whole from backup
@@ -206,6 +213,21 @@ def restore_group(group, args):
                 log (stdout, logging.ERROR)
                 log (stderr, logging.ERROR)
                 continue
+
+        if not args.replicate and config_data != "" and group.type == "lxc":
+            try:
+                config_line = [x for x in config_data.split('\n') if disk.unique_name in x][0]
+                #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
+                #options: "mp=/test,backup=1,size=8G" as list
+                options = config_line.split(',',1)[1].split(',')
+                #from "size=8G" to "8"
+                size = [element for element in options if 'size=' in element][0].split('=')[1]
+                rc, stdout, stderr = execute_command(['zfs', 'set', 'refquota=' + size, disk.destination])
+                if rc != 0:
+                    log ("VM/CT ID " + group.id + " - Could not set refquota: " + stderr, logging.WARN)
+            except:
+                log ("VM/CT ID " + group.id + " - Error during config_line parsing " + stderr, logging.WARN)
+
 
         ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
         elif disk.rollback:
@@ -440,7 +462,7 @@ def restore(args, disk_groups):
             execute_command(['mv', config_file_path + '.backup', config_file_path])
             continue
         
-        restore_group(group, args)
+        restore_group(group, vm_ct_interaction_command, args)
 
         recreate_disks_of_group(group, vm_ct_interaction_command)
 
