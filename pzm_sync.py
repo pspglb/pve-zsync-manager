@@ -171,7 +171,7 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
                 estimated_size = ""
                 if len(estimated_total_size_matches) > 0:
                     for estimated_total_size_match in estimated_total_size_matches:
-                       estimated_size_carved_match = re.search(r'(\d+(\.\d+)?(B|K|M|G|T))', estimated_total_size_match)
+                       estimated_size_carved_match = re.search(r'(\d+(\.\d+)?[BKMGT]?)', estimated_total_size_match)
                        if estimated_size_carved_match is not None:
                            estimated_size = estimated_size + estimated_size_carved_match.group() + ","
                     log_verbose ("Sent size: " + str(estimated_size[:-1]))
