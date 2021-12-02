@@ -222,11 +222,11 @@ def restore_group(group, vm_ct_interaction_command, args):
                 options = config_line.split(',',1)[1].split(',')
                 #from "size=8G" to "8"
                 size = [element for element in options if 'size=' in element][0].split('=')[1]
-                rc, stdout, stderr = execute_command(['zfs', 'set', 'refquota=' + size, disk.destination])
+                rc, stdout, stderr, pid = execute_command(['zfs', 'set', 'refquota=' + size, disk.destination])
                 if rc != 0:
                     log ("VM/CT ID " + group.id + " - Could not set refquota: " + stderr, logging.WARN)
             except:
-                log ("VM/CT ID " + group.id + " - Error during config_line parsing " + stderr, logging.WARN)
+                log ("VM/CT ID " + group.id + " - Error during config_line parsing: " + traceback.format_exc(), logging.WARN)
 
 
         ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
@@ -395,7 +395,7 @@ def snapshot_consistency_check(group, config_file_path, vm_ct_interaction_comman
         for disk in cleanup_disks:
             deleted_snaps = 0
             for snapshot in set(snapshots_to_delete_from_disk).intersection(snapnames_in_config):
-                rc, stout, stderr = execute_command(['zfs', 'destroy', disk.destination + '@' + snapshot])
+                rc, stout, stderr, pid = execute_command(['zfs', 'destroy', disk.destination + '@' + snapshot])
                 if rc != 0:
                     log (stdout, logging.WARN)
                     log (stderr, logging.WARN)
