@@ -54,9 +54,9 @@ def log(data, severity = logging.INFO):
     global logger
     global log_to_file
     if severity == logging.DEBUG:
-        print ("DEBUG - " + str(data))
+        print ("["+ datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")+"] " + " DEBUG - " + str(data))
     else:
-        print(str(data))
+        print("["+ datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")+"] " + str(data))
     logger.log(severity, data)
 
 #Log to stdout if global debug or verbose variable is set
