@@ -3,6 +3,7 @@
 import os
 import re
 import logging
+import traceback
 
 from Classes.Backed_Up_Disk import Backed_Up_Disk
 from Classes.Disk_Group import Disk_Group
@@ -192,7 +193,7 @@ def restore_group(group, args):
             rc, stdout, stderr, pid = execute_command(['zfs', 'mount', disk.destination])
             if rc != 0:
                 log (stdout, logging.ERROR)
-                log (stderr, loggign.ERROR)
+                log (stderr, logging.ERROR)
                 continue
 
         ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
@@ -208,7 +209,33 @@ def restore_group(group, args):
         elif disk.keep:
             log ("VM/CT ID " + group.id + " - destroying newer snapshots than " + disk.last_snapshot.split('@')[1] + " on " + disk.destination)
             destroy_newer_snapshots(args, disk.destination, disk.last_snapshot)
-    
+
+
+def convert_to_gib(value):
+    #Input values can be: G, T, P, E etc.
+    try: #If conversion error
+        if re.match(r'\d+\s*G', value):
+            #GiB
+            size_in_gib = int(re.sub('[\w\s]+', '',value))
+            return str(size_in_gib)
+        if re.match(r'\d+\s*T', value):
+            #TiB
+            size_in_tib = int(re.sub('[\w\s]+', '',value))
+            return str(size_in_tib * 1024)
+        if re.match(r'\d+\s*P', value):
+            #PiB
+            size_in_pib = int(re.sub('[\w\s]+', '',value))
+            return str(size_in_pib * 1024 * 1024)
+        if re.match(r'\d+\s*E', value):
+            #EiB
+            size_in_eib = int(re.sub('[\w\s]+', '',value))
+            return str(size_in_eib * 1024 * 1024 * 1024)
+    except ValueError:
+        return None
+    return None
+
+
+
 ### Recreates disks of a group which were not backed up to the remote side and user defined to do so
 def recreate_disks_of_group(group, vm_ct_interaction_command):
     ###### Unlock for recreating #####
@@ -219,21 +246,27 @@ def recreate_disks_of_group(group, vm_ct_interaction_command):
     for non_backed_up_disk in group.non_backed_up_disks:
         if non_backed_up_disk.recreate:
             log ("VM/CT ID " + group.id + " - Recreating " + non_backed_up_disk.unique_name)
-            #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
-            #options: "mp=/test,backup=1,size=8G" as list
-            options = non_backed_up_disk.config_line.split(',',1)[1].split(',')
-            #hardware_id: mp1, scsi1, sata1 etc
-            hardware_id = non_backed_up_disk.config_line.split(':', 1)[0]
-            #from "size=8G" to "8"
-            size = re.sub('[a-zA-Z]', '', [element for element in options if 'size=' in element][0].split('=')[1])
-            #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
-
-            storage_pool = non_backed_up_disk.unique_name.split(':')[0]
-            rc, stdout, stderr, pid = execute_command([vm_ct_interaction_command, 'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size},{','.join(options)}"])
-            if rc != 0:
-                log (stdout, logging.ERROR)
-                log (stderr, logging.ERROR)
-                continue
+            try:
+                #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
+                #options: "mp=/test,backup=1,size=8G" as list
+                options = non_backed_up_disk.config_line.split(',',1)[1].split(',')
+                 #hardware_id: mp1, scsi1, sata1 etc
+                hardware_id = non_backed_up_disk.config_line.split(':', 1)[0]
+                #from "size=8G" to "8"
+                size_raw = [element for element in options if 'size=' in element][0].split('=')[1]
+                size_converted = convert_to_gib(size_raw)
+                if size_converted is None:
+                    log ("VM/CT ID " + group.id + " - Can't convert " + size_raw + " to GiB, can't recreate disk", logging.ERROR)
+                    continue
+                #storage pool:from unique_name "vmsys:subvol-100-disk-1" to "vmsys"
+                storage_pool = non_backed_up_disk.unique_name.split(':')[0]
+                rc, stdout, stderr, pid = execute_command([vm_ct_interaction_command, 'set', group.id, f'--{hardware_id}', f"{storage_pool}:{size_converted},{','.join(options)}"])
+                if rc != 0:
+                    log (stdout, logging.ERROR)
+                    log (stderr, logging.ERROR)
+                    continue
+            except Exception:
+                log ("VM/CT ID " + group.id + " - Error in recreation " + traceback.format_exc(), logging.ERROR)
 
     ###### Lock again for next step #####
     if len(group.non_backed_up_disks) > 0:
