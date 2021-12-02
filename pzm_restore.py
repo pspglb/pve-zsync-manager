@@ -138,8 +138,13 @@ def destroy_newer_snapshots(args, destination, snapshot):
         execute_command(['zfs', 'destroy', snap])
 
 #Checks if a dataset is encrypted
-def zfs_is_encrypted(dataset):
-    rc, stdout, stderr = execute_readonly_command(['zfs', 'get', 'encryption', '-H', '-o', 'value', dataset])
+def zfs_is_encrypted(dataset, hostname=None):
+    command = []
+    if hostname is not None:
+        command = ['ssh', '-o', 'BatchMode yes', 'root@' + hostname, 'zfs', 'get', 'encryption', '-H', '-o', 'value', dataset]
+    else:
+        command = ['zfs', 'get', 'encryption', '-H', '-o', 'value', dataset]
+    rc, stdout, stderr = execute_readonly_command(command)
     if rc != 0:
         return False
     elif "off" in stdout:
@@ -148,7 +153,7 @@ def zfs_is_encrypted(dataset):
         return True
 
 ### Does the restore of a group based on the previously gathered user input data
-def restore_group(group, args):    
+def restore_group(group, args):
     ###### Start the restore progress
     for disk in group.backed_up_disks:
         ### If the disk is set to be restored as a whole from backup
@@ -161,16 +166,21 @@ def restore_group(group, args):
                     log (stdout, logging.ERROR)
                     log (stderr, logging.ERROR)
                     continue
-            rc, stdout, stderr, pid = execute_command(['ssh -o \"BatchMode yes\" root@' + args.hostname + ' zfs send -Rw ' +  disk.last_snapshot + ' | zfs recv -F ' + disk.destination], shell=True)
+            send_flags = ""
+            if args.replicate:
+                flags += "-R"
+                if zfs_is_encrypted(disk.full_name, args.hostname):
+                    flags += "w" #Raw send needed when replicating an encrypted dataset
+
+            rc, stdout, stderr, pid = execute_command(['ssh -o \"BatchMode yes\" root@' + args.hostname + ' zfs send ' + send_flags + ' ' +  disk.last_snapshot + ' | zfs recv -F ' + disk.destination], shell=True)
             if stderr != "":
                 log (stdout, logging.ERROR)
                 log (stderr, logging.ERROR)
                 continue
 
             ### If a keyfile was specified, and the disk is/was encrypted load the key in
-            if args.keyfile is not None:
-                dataset_encrypted = zfs_is_encrypted(disk.destination)
-                parent_encrypted = zfs_is_encrypted(disk.destination.rsplit('/',1)[0])
+            if args.keyfile is not None and args.replicate: #Only load key-file if disk is encrypted and sent with replicate - which would need a raw flag
+                dataset_encrypted = zfs_is_encrypted(disk.full_name, args.hostname)
                 if dataset_encrypted:
                     rc, stdout, stderr, pid = execute_command(['zfs', 'set', 'keylocation=file://' + args.keyfile, disk.destination])
                     if rc != 0:
@@ -183,6 +193,7 @@ def restore_group(group, args):
                         log (stderr, logging.ERROR)
                         continue
                     ### If the parent zfs-dataset of the disk is also encrypted, inherit the key from it
+                    parent_encrypted = zfs_is_encrypted(disk.destination.rsplit('/',1)[0])
                     if parent_encrypted:
                         rc, stdout, stderr, pid = execute_command(['zfs', 'change-key', '-i', disk.destination])
                         if rc != 0:

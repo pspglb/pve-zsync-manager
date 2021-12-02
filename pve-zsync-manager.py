@@ -57,6 +57,7 @@ def main():
     restoreArgsRequired.add_argument("--zfs-source-pool", help="ZFS Source Pool (Same as destination Pool with \"sync\")", type=str, required=True)
     restoreArgsRequired.add_argument("--backupname", help="Name of PVE-ZSYNC Snapshots (Same as with \"sync\")", type=str, required=True)
     restoreArgsRequired.add_argument("--config-path", help="Path to restore VM/CT config files from", type=str, required=True)
+    restoreArgsParser.add_argument("--replicate", help="Set if Dataset should be replicated with all Snapshots and Properties", action="store_true"
     restoreArgsParser.add_argument("--keyfile", help="Path to keyfile, needed for inheriting the ZFS-Key", type=str)
     restoreArgsParser.add_argument("--test", help="Only test the functionality, do not actually execute anything", action="store_true")
     restoreArgsParser.add_argument("--verbose", help="Enable verbose mode", action="store_true")
