@@ -216,20 +216,21 @@ def restore_group(group, vm_ct_interaction_command, args):
                         log (stdout, logging.ERROR)
                         log (stderr, logging.ERROR)
                         continue
-
-        if not args.replicate and config_data != "" and group.type == "lxc":
-            try:
-                config_line = [x for x in config_data.split('\n') if disk.unique_name in x][0]
-                #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
-                #options: "mp=/test,backup=1,size=8G" as list
-                options = config_line.split(',',1)[1].split(',')
-                #from "size=8G" to "8"
-                size = [element for element in options if 'size=' in element][0].split('=')[1]
-                rc, stdout, stderr, pid = execute_command(['zfs', 'set', 'refquota=' + size, disk.destination])
-                if rc != 0:
-                    log ("VM/CT ID " + group.id + " - Could not set refquota: " + stderr, logging.WARN)
-            except:
-                log ("VM/CT ID " + group.id + " - Error during config_line parsing: " + traceback.format_exc(), logging.WARN)
+            #Set refquota on lxc containers. Also when replicated as we can't be sure it has refquota set on remote side (non replicated sync to destination, replicated sync back)
+            #Don't know why someone would do that, but lets be as safe as possible
+            if config_data != "" and group.type == "lxc":
+                try:
+                    config_line = [x for x in config_data.split('\n') if disk.unique_name in x][0]
+                    #config line: "mp0: vmsys:subvol-100-disk-1,mp=/test,backup=1,size=8G"
+                    #options: "mp=/test,backup=1,size=8G" as list
+                    options = config_line.split(',',1)[1].split(',')
+                    #from "size=8G" to "8"
+                    size = [element for element in options if 'size=' in element][0].split('=')[1]
+                    rc, stdout, stderr, pid = execute_command(['zfs', 'set', 'refquota=' + size, disk.destination])
+                    if rc != 0:
+                        log ("VM/CT ID " + group.id + " - Could not set refquota: " + stderr, logging.WARN)
+                except:
+                    log ("VM/CT ID " + group.id + " - Error during config_line parsing: " + traceback.format_exc(), logging.WARN)
 
 
         ### Disk which are set to rollback, will just rollback the local disk to the snapshot which has the same timestamp as a restore disk
