@@ -97,6 +97,8 @@ def backup(hostname,zfspool,backupname,ids,replicate,raw,properties,maxsnap,retr
     if not ("localhost" in hostname or "127.0.0.1" in hostname):
         destination = hostname + ":" + destination
 
+    ids.sort() #Sort ID list, so qms and cts are not synced in series, but in order based on their VM/CT id
+
 
     for id in ids:
         log ("ID " + id + " syncing...")
