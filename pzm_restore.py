@@ -208,11 +208,14 @@ def restore_group(group, vm_ct_interaction_command, args):
                             log (stderr, logging.ERROR)
                             continue
 
-            rc, stdout, stderr, pid = execute_command(['zfs', 'mount', disk.destination])
-            if rc != 0:
-                log (stdout, logging.ERROR)
-                log (stderr, logging.ERROR)
-                continue
+            if group.type == "lxc": #Only attempt to mount a dataset, not a zvol
+                rc, stdout, stderr = execute_readonly_command(['zfs', 'get', 'mounted', '-H', '-o', 'value', disk.destination])
+                if rc == 0 and "no" in stdout: #If the process errors, there might be something wrong here, if no in stdout then mount the disk
+                    rc, stdout, stderr, pid = execute_command(['zfs', 'mount', disk.destination])
+                    if rc != 0:
+                        log (stdout, logging.ERROR)
+                        log (stderr, logging.ERROR)
+                        continue
 
         if not args.replicate and config_data != "" and group.type == "lxc":
             try:
