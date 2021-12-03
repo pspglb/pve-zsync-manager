@@ -249,21 +249,22 @@ def convert_to_gib(value):
     try: #If conversion error
         if re.match(r'\d+\s*G', value):
             #GiB
-            size_in_gib = int(re.sub('[\w\s]+', '',value))
+            size_in_gib = int(re.sub('[\sG]+', '',value))
             return str(size_in_gib)
         if re.match(r'\d+\s*T', value):
             #TiB
-            size_in_tib = int(re.sub('[\w\s]+', '',value))
+            size_in_tib = int(re.sub('[\sT]+', '',value))
             return str(size_in_tib * 1024)
         if re.match(r'\d+\s*P', value):
             #PiB
-            size_in_pib = int(re.sub('[\w\s]+', '',value))
+            size_in_pib = int(re.sub('[\sP]+', '',value))
             return str(size_in_pib * 1024 * 1024)
         if re.match(r'\d+\s*E', value):
             #EiB
-            size_in_eib = int(re.sub('[\w\s]+', '',value))
+            size_in_eib = int(re.sub('[\sE]+', '',value))
             return str(size_in_eib * 1024 * 1024 * 1024)
     except ValueError:
+        log_debug ("Conversion error " + traceback.format_exc())
         return None
     return None
 
